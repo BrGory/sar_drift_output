@@ -1,0 +1,8 @@
+numpy
+pandas
+xarray
+geopandas
+shapely
+pyproj
+netCDF4
+scipy

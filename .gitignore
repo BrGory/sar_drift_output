@@ -1,0 +1,17 @@
+# Data files
+**/*.txt
+!requirements.txt
+**/*.csv
+**/*.xml
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+**/*.ipynb
+
+# Python cache
+__pycache__
+
+# Output files
+output
+**/*.gpkg
+**/*.nc
