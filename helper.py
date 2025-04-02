@@ -177,3 +177,139 @@ def get_haversine(lat1, lon1, lat2, lon2, r_earth):
     dY = distance * np.sin(bearing)  # North-South displacement
 
     return dX, dY
+
+
+def add_netcdf_attrs(netcdf_grid, df):
+    from datetime import datetime, timedelta
+    
+    # Time measurements
+    base_time = datetime(2000, 1, 1)
+    min_time_js = df['Time1_JS'].min()
+    max_time_js = df['Time1_JS'].max()
+    
+    # Convert to datetime
+    min_time = base_time + timedelta(seconds=float(min_time_js))
+    max_time = base_time + timedelta(seconds=float(max_time_js))
+    
+    # Format as 'YYYY-MM-DDT00:00:00Z'
+    min_time_str = min_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    max_time_str = max_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    
+    # Create standard attributes for NetCDF metadata
+    netcdf_grid.attrs.update({
+        #'_NCProperties': netcdf_grid.attrs.get('_NCProperties'),
+        'acknowledgement': 'Produced by NOAA using IABP data.',
+        'cdm_data_type': 'Grid',
+        'contributor_name': (
+            'NOAA PolarWatch, Southwest Fisheries Science Center, '
+            'NESDIS STAR, U.S. National Ice Center'
+            ),
+        'contributor_role': 'Producer, Publisher, Advisor, Originator',
+        'Conventions': 'CF-1.8, ACDD-1.3',
+        'creator_email': 'brendon.gory@noaa.gov',
+        'creator_institution': 'CIRA/NOAA',
+        'creator_name': 'Brendon Gory',
+        'creator_type': 'Institution',
+        'creator_url': 'https://noaa.gov/',
+        'date_created': datetime.utcnow().strftime('%Y-%m-%dT00:00:00Z'),
+        'grid_mapping__ChunkSizes': 1,
+        'grid_mapping_false_easting': 0,
+        'grid_mapping_false_northing': 0,
+        'grid_mapping_latitude_of_projection_origin': 90,
+        'grid_mapping_name': 'ploar_stereographic',
+        'grid_mapping_proj4text': (
+            '+proj=stere +lat_0=90 +lat_ts=60 +lon_0=-80 +k=1 '
+            '+x_0=0 +y_0=0 +a=6378137 +b=6356257 +units=m +no_defs'
+            ),
+        'grid_mapping_semi_major_axis': 6378137,
+        'grid_mapping_semi_minor_axis': 6356257,
+        'grid_mapping_spatial_ref': (
+            'PROJCS["unknown",GEOGCS["unknown",DATUM["unknown",'
+            'SPHEROID["unknown",6378137,291.505347349177]],'
+            'PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],'
+            'UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]],'
+            'PROJECTION["Polar_Stereographic"],'
+            'PARAMETER["latitude_of_origin",60],'
+            'PARAMETER["central_meridian",-80],PARAMETER["false_easting",0],'
+            'PARAMETER["false_northing",0],'
+            'UNIT["metre",1,AUTHORITY["EPSG","9001"]],'
+            'AXIS["Easting",SOUTH],AXIS["Northing",SOUTH]]'
+            ),
+        'grid_mapping_standard_parallel': 60,
+        'grid_mapping_straight_vertical_longitude_from_pole': -80,
+        'grid_mapping_units': 'm',
+        'history': (
+            '02 Apr 2025: First version of convert SAR dailt drift to NetCDF'
+            ),
+        'infoUrl': (
+            'https://coastwatch.noaa.gov/cwn/products/'
+            'sar-composite-arctic-imagery-normalized-radar-cross-section.html'
+            ),
+        'institution': 'NOAA CoastWatch',
+        'instrument': (
+                'See website for details'
+                'https://coastwatch.noaa.gov/cwn/products/'
+                'sar-composite-arctic-imagery-normalized-'
+                'radar-cross-section.html'
+                ),
+        'keywords': (
+            'Earth Science > Cryosphere > Sea Ice > Ice Extent, Earth Science '
+            '> Cryosphere > Snow/Ice > Snow Cover, GEOGRAPHIC REGION > '
+            'ARCTIC, GEOGRAPHIC REGION > NORTHERN HEMISPHERE, '
+            'GEOGRAPHIC REGION > POLAR'
+            ),
+        'keywords_vocabulary': (
+            'NASA Global Change Master Directory (GCMD) Keywords, Version 9.0'
+            ),
+        'license': 'CC-10',
+        'metadata_link': (
+            'https://coastwatch.noaa.gov/cwn/products/'
+            'sar-composite-arctic-imagery-normalized-radar-cross-section.html'
+            ),
+        'naming_authority': 'gov.noaa.coastwatch',
+        'ncei_template_version': 'NCEI_NetCDF_Grid_Template_v2.0',
+        'platform': (
+            'Earth Observation Satellites, In Situ Land-based Platforms, '
+            'Ground Stations, Models/Analyses'
+            ),
+        'platform_vocabulary': (
+            'NASA Global Change Master Directory (GCMD) Keywords, Version 9.0'
+            ),
+        'processing_level': 'NOAA Level 4',
+        'product_version': 'Version 1',
+        'project': (
+            'SAR Daily Sea Ice Drift'
+            ),
+        'publisher_email': 'coastwatch at noaa dot gov',
+        'publisher_institution': 'NOAA CoastWatch',
+        'publisher_name':'NOAA CoastWatch',
+        'publisher_type': 'Institutional',
+        'publisher_url': 'coastwatch.noaa.gov',
+        'references': (
+                'See website for details'
+                'https://coastwatch.noaa.gov/cwn/products/'
+                'sar-composite-arctic-imagery-normalized-'
+                'radar-cross-section.html'
+                ),
+        'source': 'SAR Daily Drift dataset',
+        'sourceUrl': (
+            'https://www.star.nesdis.noaa.gov/socd/mecb/sar/AKDEMO_products/'
+            'COMPOSITE_TIFF/DRIFT_SHAPEFILES/'
+            ),
+        'standard_name_vocabulary': (
+            'CF Standard Name Table (Version 72, 10 March 2020)'
+            ),
+        'summary': (
+            'NetCDF version of SAR daily drift dataset. This includes the '
+            'starting longitude and latitude, ending longitude and latitude '
+            'start and end date of observation, the distance traveled in the '
+            'observation period, and the bearing of the drift.'
+            ),
+        'title': 'SAR drift data converted from raw text form to NetCDF',
+        'time_coverage_duration': 'P1D',
+        'time_coverge_end': max_time_str,
+        'time_coverage_resolution': 'P1D',
+        'time_coverge_start': min_time_str,
+            })
+    
+    return netcdf_grid

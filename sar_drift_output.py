@@ -264,8 +264,10 @@ def create_shape_package(user_args, df):
 
 
 def create_netcdf(user_args, df):
+    import helper
     import os
     import numpy as np
+    from datetime import datetime, timedelta
     from pyproj import Transformer
     import xarray as xr
    
@@ -296,77 +298,112 @@ def create_netcdf(user_args, df):
     
     try:
         # Create an empty grid
+        # (time, y, x)
+        grid_shape = (1, len(y_coords), len(x_coords))  
+        
+        # Time defaults
+        base_time = datetime(2000, 1, 1)
+        mean_time_js = df['Time1_JS'].mean()
+        time_val = base_time + timedelta(seconds=mean_time_js)
+        epoch = datetime(1970, 1, 1)
+        time_sec = (time_val - epoch).total_seconds()
+        
+        # time_array becomes:
+        time_array = np.array([time_sec], dtype='float64')
+        
         netcdf_grid = xr.Dataset(
             {
-                'Speed_kmdy': (('y', 'x'),
-                               np.full((len(y_coords), len(x_coords)), np.nan),
+                'Speed_kmdy': (('time', 'y', 'x'),
+                               np.full(grid_shape, np.nan),
                                {
                                    'long_name': 'Speed in km/day',
-                                   'units': 'km/day'
+                                   'ioos_category': 'SAR daily sea-ice drift',
+                                   'units': 'km/day',
+                                   'grid_mapping': 'spatial_ref'
                                    }
                                ),
-                'U_vel_ms': (('y', 'x'),
-                             np.full((len(y_coords), len(x_coords)), np.nan),
-                             {'long_name': 'Zonal Velocity', 'units': 'm/s'}
+                'U_vel_ms': (('time', 'y', 'x'),
+                             np.full(grid_shape, np.nan),
+                             {
+                                 'long_name': 'Zonal Velocity',
+                                 'ioos_category': 'SAR daily sea-ice drift',
+                                 'units': 'm/s',
+                                 'grid_mapping': 'spatial_ref'
+                                  }
                              ),
-                'V_vel_ms': (('y', 'x'),
-                             np.full((len(y_coords), len(x_coords)), np.nan),
+                'V_vel_ms': (('time', 'y', 'x'),
+                             np.full(grid_shape, np.nan),
                              {
                                  'long_name': 'Meridional Velocity',
-                                 'units': 'm/s'
+                                 'ioos_category': 'SAR daily sea-ice drift',
+                                 'units': 'm/s',
+                                 'grid_mapping': 'spatial_ref'
                                  }
                              ),
-                'Bear_deg': (('y', 'x'),
-                             np.full((len(y_coords), len(x_coords)), np.nan),
-                             {'long_name': 'Bearing', 'units': 'degrees'}
+                'Bear_deg': (('time', 'y', 'x'),
+                             np.full(grid_shape, np.nan),
+                             {
+                                 'long_name': 'Bearing',
+                                 'ioos_category': 'SAR daily sea-ice drift',
+                                 'units': 'degrees',
+                                 'grid_mapping': 'spatial_ref'
+                                 }
                              )
             },
             # Add metadata to coords so QGIS can properly scale the map
             coords={
                 'x': (('x',), x_coords,
                       {
+                          'actual_range': (
+                              [float(x_coords.min()), float(x_coords.max())]
+                              ),
+                          'axis': 'X',
+                          'comment': (
+                              'x values are the centers of the grid cells'
+                              ),
+                          'ioos_category': 'Location',
+                          'long_name': 'x coordinate of projection',
                           'standard_name': 'projection_x_coordinate',
-                          'long_name': 'Easting', 'units': 'meters'
+                          'units': 'm'
                           }),
                 'y': (('y',), y_coords,
                       {
-                          'standard_name': 'projection_y_coordinate',
-                          'long_name': 'Northing', 'units': 'meters'
-                          })
+                          'actual_range': (
+                              [float(y_coords.min()), float(y_coords.max())]
+                              ),
+                          'axis': 'Y',
+                          'comment': (
+                              'y values are the centers of the grid cells'
+                              ),                          
+                          'ioos_category': 'Location',
+                          'long_name': 'y coordinate of projection',
+                          'standard_name': 'projection_x_coordinate',
+                          'units': 'm'
+                          }),
+                'time': (('time',), time_array, {
+                    'actual_range': (
+                        [float(time_array.min()), float(time_array.max())]
+                        ),
+                    'axis': 'T',
+                    'comment': (
+                        'This is the 00Z reference time. '
+                        'Note that products are nowcasted to be valid '
+                        'specifically at the time given here.'
+                        ),
+                    'CoordinateAxisType': 'Time',
+                    'ioos_category': 'Time',
+                    'long_name': 'Centered Time',
+                    'standard_name': 'time',
+                    'time_origin': '01-Jan-1970 0:00:00',
+                })
             }
         )
         
-        # Set CF-1.8 Conventions for NetCDF
-        netcdf_grid.attrs['Conventions'] = 'CF-1.8'
+        
+        # Add NetCDF standard attributes
+        netcdf_grid = helper.add_netcdf_attrs(netcdf_grid, df)
         
         
-        # Setting grid_mapping for each variable.
-        # Units will be meters, degrees or km/day.
-        # Update titles to more user-friendly descriptions
-        for var_name in ['Speed_kmdy', 'U_vel_ms', 'V_vel_ms', 'Bear_deg']:
-            # Determine units
-            if 'ms' in var_name:
-                units = 'meters'
-            elif 'Speed_kmdy' in var_name:
-                units = 'km/day'
-            else:
-                units = 'degrees'
-                
-            long_name = {
-                'Speed_kmdy': 'Speed in km/day',
-                'U_vel_ms': 'Zonal Velocity',
-                'V_vel_ms': 'Meridional Velocity',
-                'Bear_deg': 'Bearing'
-                }
-                
-                
-            netcdf_grid[var_name].attrs = {
-                'grid_mapping': 'spatial_ref',
-                'units': units,
-                'long_name': long_name[var_name]
-            }
-    
-            
         # Mapping data to the grid
         index_mapping = {}
         for _, row in df.iterrows():
@@ -382,61 +419,11 @@ def create_netcdf(user_args, df):
                 print(f"Duplicate index detected at (i, j): {index_key}")
             else:
                 # Store data in the grid
-                netcdf_grid['Speed_kmdy'][y_idx, x_idx] = row['Speed_kmdy']    
-                netcdf_grid['U_vel_ms'][y_idx, x_idx] = row['U_vel_ms']
-                netcdf_grid['V_vel_ms'][y_idx, x_idx] = row['V_vel_ms']
-                netcdf_grid['Bear_deg'][y_idx, x_idx] = row['Bear_deg']
+                netcdf_grid['Speed_kmdy'][0, y_idx, x_idx] = row['Speed_kmdy']    
+                netcdf_grid['U_vel_ms'][0, y_idx, x_idx] = row['U_vel_ms']
+                netcdf_grid['V_vel_ms'][0, y_idx, x_idx] = row['V_vel_ms']
+                netcdf_grid['Bear_deg'][0, y_idx, x_idx] = row['Bear_deg']
         
-        
-        # Adding projection metadata
-        # The AUTHORITY metadata values ensure the points will be 
-        # properly mapped if opened in QGIS
-        netcdf_grid['spatial_ref'] = xr.DataArray(0, attrs={
-            'grid_mapping_name': 'polar_stereographic',
-            'straight_vertical_longitude_from_pole': -45.0,
-            'latitude_of_projection_origin': 90.0,
-            'standard_parallel': 70.0,
-            'false_easting': 0.0,
-            'false_northing': 0.0,
-            'semi_major_axis': 6378137.0,
-            'inverse_flattening': 298.257223563,
-            'spatial_ref': 'PROJCS["WGS 84 / NSIDC Sea Ice Polar '
-                           'Stereographic North",'
-                           'GEOGCS["WGS 84",'
-                           'DATUM["WGS_1984",'
-                           'SPHEROID["WGS 84",6378137,298.257223563,'
-                           'AUTHORITY["EPSG","7030"]],'
-                           'AUTHORITY["EPSG","6326"]],'
-                           'PRIMEM["Greenwich",0],'
-                           'UNIT["degree",0.0174532925199433],'
-                           'AUTHORITY["EPSG","4326"]],'
-                           'PROJECTION["Stereographic_North_Pole"],'
-                           'PARAMETER["latitude_of_origin",90],'
-                           'PARAMETER["central_meridian",-45],'
-                           'PARAMETER["standard_parallel_1",70],'
-                           'PARAMETER["false_easting",0],'
-                           'PARAMETER["false_northing",0],'
-                           'UNIT["metre",1,'
-                           'AUTHORITY["EPSG","9001"]],'
-                           'AXIS["Easting",EAST],'
-                           'AXIS["Northing",NORTH]]'
-        })
-        
-        # Associate the 'spatial_ref' with the variables
-        # Needed to properly scale in QGIS
-        for var_name in ['U_vel_ms', 'V_vel_ms', 'Speed_kmdy', 'Bear_deg']:
-            netcdf_grid[var_name].attrs['grid_mapping'] = 'spatial_ref'
-        
-            
-        netcdf_grid['Speed_kmdy'].attrs = {
-            'long_name': 'Speed in km/day',
-            'units': 'km/day',
-            'grid_mapping': 'spatial_ref'
-        }    
-        
-        # Additional attributes for the Speed variable
-        # (Helps some NetCDF readers)
-        netcdf_grid['Speed_kmdy'].attrs['coordinates'] = 'x y'  
         
         # Save to NetCDF with compression level 4
         inputfile_rootname = os.path.basename(user_args['input_filename'])
@@ -453,6 +440,7 @@ def create_netcdf(user_args, df):
         })
     
         print(f'NetCDF <{output_file_path}> created')
+        
         
     finally:
         # Ensure that these lines are executed even if an error occurs
@@ -473,6 +461,7 @@ def main():
 
     # Create NetCDF file for QGIS    
     create_netcdf(user_args, df)
+    
    
     print('done')
 
