@@ -1,0 +1,17 @@
+name: sar_drift
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - pandas
+  - xarray
+  - geopandas
+  - shapely
+  - pyproj
+  - netCDF4
+  - scipy
+  - pip
+  - pip:
+      - nc-time-axis

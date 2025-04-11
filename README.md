@@ -1,14 +1,42 @@
-
 # SAR Drift Output Generator
 
 ## Project Overview
-This project provides a tool for converting SAR drift data into `.gpkg` (GeoPackage) and `.nc` (NetCDF) files, which can be visualized in programs like QGIS or any tool that supports NetCDF format.
+
+This project provides a tool to convert SAR drift data into:
+- `.gpkg` (GeoPackage) files for visualization in GIS tools like QGIS
+- `.nc` (NetCDF) files for scientific analysis and compliance with metadata standards
+
+It supports Polar Stereographic projection (EPSG:3413) and includes metadata injection from CDL templates using `ncgen`.
+
+---
+
+## Features
+
+- Extracts and cleans drift data from `.txt` files
+- Computes duration, distance, and azimuth per observation
+- Converts lat/lon to projected `x/y` in meters using EPSG:3413
+- Builds gridded NetCDF output with CF/ACDD metadata via `.cdl` files
+- Generates GeoPackage output for GIS visualization
+
+---
 
 ## Requirements
 
-This project has several dependencies that are listed in the `requirements.txt` file. You can use the `requirements.txt` file to install all necessary packages using either `pip` or `conda`.
+Install dependencies via:
 
-### Python Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+Or use a Conda environment (recommended):
+
+```bash
+conda env create -f environment.yml
+conda activate sar_drift
+```
+
+### Dependencies
+
 - numpy
 - pandas
 - xarray
@@ -18,91 +46,76 @@ This project has several dependencies that are listed in the `requirements.txt` 
 - netCDF4
 - scipy
 
-## Setting Up the Conda Environment
+You also need `ncgen` from the [NetCDF-C tools](https://www.unidata.ucar.edu/software/netcdf/) for CDL file parsing.
+```bash
+conda install -c conda-forge netcdf-c netcdf4 nco
+ncgen -h
+ncdump -h
+ncks --version
+```
 
-To set up the environment for this project, follow these steps:
 
-### 1. Create a New Conda Environment
+---
 
-First, create a new Conda environment called `sar_drift` and install Python. You can choose the version of Python you want (e.g., `python=3.9`):
+## Metadata Injection via CDL
+
+The script supports injecting metadata from a CDL file. It uses:
+
+- `ncgen` to convert a `.cdl` template into a `.nc` file
+- `xarray` to read and apply global attributes
+- Placeholder replacement for fields like `FILL_DATE_CREATED`, `FILL_MIN_TIME`
+
+Ensure your `.cdl` file lives in a directory (default: `meta/`) and follows CF/ACDD conventions.
+
+---
+
+## Running the Script
 
 ```bash
-conda create --name sar_drift python=3.9
+python sar_drift_output.py -i <input_file> [options]
 ```
 
-### 2. Activate the Environment
+### Required arguments:
+- `-i`, `--input_filename`: Path to SAR drift `.txt` file
 
-Activate the newly created environment:
+### Optional arguments:
+- `-o`, `--output_dir`: Directory for `.nc` and `.gpkg` output (default: `output`)
+- `-m`, `--metadata_dir`: Directory containing the CDL file (default: `meta`)
+- `-cdl`, `--cdl_filename`: CDL file name (default: `sar_drift_output.cdl`)
+- `-p`, `--precision`: Decimal precision for numeric output (default: 3)
+- `-c`, `--compute`: Compute azimuth and distance using `pyproj` (vs. using original fields)
+- `-v`, `--verbose`: Verbose logging
+
+### Example:
 
 ```bash
-conda activate sar_drift
+python sar_drift_output.py -i data/sample_drift.txt -c -v
 ```
 
-### 3. Install the Required Packages
+---
 
-Once the environment is activated, you can install the dependencies listed in the `requirements.txt` file using `pip`:
+## Output
 
-```bash
-pip install -r requirements.txt
-```
+You will find:
+- A `.nc` file in the output directory, CF/ACDD-compliant
+- A `.gpkg` file with both point and line geometries for QGIS
 
-Alternatively, if you want to use a Conda environment file, you can create an `environment.yml` file. Here's an example `environment.yml`:
+---
 
-```yaml
-name: sar_drift
-channels:
-  - conda-forge
-  - defaults
-dependencies:
-  - python=3.9
-  - numpy
-  - pandas
-  - xarray
-  - geopandas
-  - shapely
-  - pyproj
-  - netCDF4
-  - scipy
-```
+## Notes
 
-To create the environment using the YAML file:
+- Metadata in the `.cdl` file must use valid CDL syntax and declare dimensions and attributes cleanly.
+- Placeholders like `FILL_DATE_CREATED` are automatically replaced based on the input file contents.
 
-```bash
-conda env create -f environment.yml
-```
-
-Activate the environment:
-
-```bash
-conda activate sar_drift
-```
-
-### 4. Run the Script
-
-Once the environment is set up, you can run the `sar_drift_output.py` script by providing the necessary arguments:
-
-```bash
-python sar_drift_output.py -i <input_file> -o <output_directory> -p <precision> -v
-```
-
-Where:
-- `-i` or `--input_filename` specifies the SAR drift data file (either `.txt` or `.nc`).
-- `-o` or `--output_dir` specifies the output directory where `.gpkg` and `.nc` files will be saved.
-- `-p` or `--precision` specifies the number of digits after the decimal point for precision (default is `3`).
-- `-v` or `--verbose` enables verbose output for additional information during execution.
-
-### 5. Generate the Output Files
-
-The script will process the input SAR drift data, compute necessary parameters, and generate:
-- A `.gpkg` file (GeoPackage) containing the processed drift data for visualization in QGIS.
-- A `.nc` file (NetCDF) containing the drift data in a format suitable for use with other tools.
+---
 
 ## License
 
-This software is licensed under the MIT License. See the `LICENSE` file for details.
+This project is licensed under the MIT License.
+
+---
 
 ## Contact
 
-For more information, please contact:
-- Brendon Gory (brendon.gory@noaa.gov)
-- Dr. Prasanjit Dash (prasanjit.dash@noaa.gov)
+- Brendon Gory — [brendon.gory@noaa.gov](mailto:brendon.gory@noaa.gov)
+- Dr. Prasanjit Dash — [prasanjit.dash@noaa.gov](mailto:prasanjit.dash@noaa.gov)

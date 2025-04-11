@@ -52,17 +52,33 @@ def read_arguments():
     # Input filename argument
     parser.add_argument(
         '-i', '--input_filename',
+        type=str,
         action='store',
-        help='SAR drift file to be converted'
+        help='SAR drift file to be converted.'
         )
     
     # Output directory argument
     parser.add_argument(
         '-o', '--output_dir',
+        default='output', type=str,
         action='store',
         help='Directory on file sys to store convert shape files '
-             'and NetCDF files',        
+             'and NetCDF files.',        
         )
+    
+    # Metadata directory
+    parser.add_argument(
+        '-m', '--metadata_dir',
+        default='meta', type=str,
+        action='store',
+        help='Directory where CDL file (metadata) is stored.')
+    
+    # Metadata directory
+    parser.add_argument(
+        '-cdl', '--cdl_filename',
+        default='sar_drift_output.cdl', type=str,
+        action='store',
+        help='Directory where CDL file (metadata) is stored.')
     
     # Precison argument
     parser.add_argument(
@@ -97,24 +113,32 @@ def read_arguments():
             )
         sys.exit(1)
 
-    if args.output_dir is None:
-        print(
-            'Please pass output directory when calling script. '
-            'Use -h for help. <sar_drift_output.py -h>'
-            )
-        sys.exit(1)
             
     # Check the output directory exists
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Check input file exists
-    if not os.path.exists((args.input_filename)):
-        raise ValueError(f"Cannot find {args.input_filename}")
+    if not os.path.exists(args.input_filename):
+        print(f"Cannot find {args.input_filename}")
+        sys.exit(1)        
         
+    # Check metadata dir exists
+    if not os.path.exists(args.metadata_dir):
+        print(f"Cannot find {args.metadata_dir}")
+        sys.exit(1)
+        
+    # Check for CDL file
+    cdl_filename = os.path.join(args.metadata_dir, args.cdl_filename)
+    if not os.path.exists(cdl_filename):
+        print(f"Cannot find {cdl_filename}")
+        sys.exit(1) 
+    
     
     user_args = {
         'input_filename': args.input_filename,
         'output_dir': os.path.normpath(os.path.join(args.output_dir)),
+        'metadata_dir': os.path.normpath(os.path.join(args.metadata_dir)),
+        'cdl_filename': cdl_filename,
         'precision': args.precision,
         'compute': args.compute,
         'verbose': args.verbose
@@ -127,6 +151,10 @@ def read_arguments():
         f"{user_args['input_filename']}\n"
         "  output directory -o:              "
         f"{user_args['output_dir']}\n"
+        "  metadata directory -m:            "
+        f"{user_args['metadata_dir']}\n"
+        "  CDL file -cdl:                    "
+        f"{user_args['cdl_filename']}\n"        
         "  precision (-p):                   "
         f"{user_args['precision']}\n"
         "  compute distance and bearing -c:  "
@@ -307,6 +335,8 @@ def create_netcdf(user_args, df):
         time_val = base_time + timedelta(seconds=mean_time_js)
         epoch = datetime(1970, 1, 1)
         time_sec = (time_val - epoch).total_seconds()
+        min_time = base_time + timedelta(seconds=float(df['Time1_JS'].min()))
+        max_time = base_time + timedelta(seconds=float(df['Time1_JS'].max()))
         
         # time_array becomes:
         time_array = np.array([time_sec], dtype='float64')
@@ -314,41 +344,47 @@ def create_netcdf(user_args, df):
         netcdf_grid = xr.Dataset(
             {
                 'Speed_kmdy': (('time', 'y', 'x'),
-                               np.full(grid_shape, np.nan),
-                               {
-                                   'long_name': 'Speed in km/day',
-                                   'ioos_category': 'SAR daily sea-ice drift',
-                                   'units': 'km/day',
-                                   'grid_mapping': 'spatial_ref'
-                                   }
-                               ),
+                                np.full(grid_shape, np.nan),
+                                {
+                                    'long_name': "Speed in km/day",
+                            		'standard_name': "sea_ice_speed",
+                                    'ioos_category': (
+                                        "SAR daily sea-ice drift"
+                                        ),
+                                    'units': "km/day",
+                                    'grid_mapping': "spatial_ref"
+                                    }
+                                ),
                 'U_vel_ms': (('time', 'y', 'x'),
-                             np.full(grid_shape, np.nan),
-                             {
-                                 'long_name': 'Zonal Velocity',
-                                 'ioos_category': 'SAR daily sea-ice drift',
-                                 'units': 'm/s',
-                                 'grid_mapping': 'spatial_ref'
+                              np.full(grid_shape, np.nan),
+                              {
+                                  'long_name': 'Zonal Velocity',
+                                  'standard_name': 'movement_in_x_direction',
+                                  'ioos_category': 'SAR daily sea-ice drift',
+                                  'units': 'm/s',
+                                  'grid_mapping': 'spatial_ref'
                                   }
-                             ),
+                              ),
                 'V_vel_ms': (('time', 'y', 'x'),
-                             np.full(grid_shape, np.nan),
-                             {
-                                 'long_name': 'Meridional Velocity',
-                                 'ioos_category': 'SAR daily sea-ice drift',
-                                 'units': 'm/s',
-                                 'grid_mapping': 'spatial_ref'
-                                 }
-                             ),
+                              np.full(grid_shape, np.nan),
+                              {
+                                  'long_name': 'Meridional Velocity',
+                                  'standard_name': 'movement_in_y_direction',
+                                  'ioos_category': 'SAR daily sea-ice drift',
+                                  'units': 'm/s',
+                                  'grid_mapping': 'spatial_ref'
+                                  }
+                              ),
                 'Bear_deg': (('time', 'y', 'x'),
-                             np.full(grid_shape, np.nan),
-                             {
-                                 'long_name': 'Bearing',
-                                 'ioos_category': 'SAR daily sea-ice drift',
-                                 'units': 'degrees',
-                                 'grid_mapping': 'spatial_ref'
-                                 }
-                             )
+                              np.full(grid_shape, np.nan),
+                              {
+                                  'long_name': 'Bearing',
+                                  'standard_name': "direction_true_north",
+                                  'ioos_category': 'SAR daily sea-ice drift',
+                                  'units': 'degrees',
+                                  'grid_mapping': 'spatial_ref'
+                                  }
+                              )
             },
             # Add metadata to coords so QGIS can properly scale the map
             coords={
@@ -395,13 +431,28 @@ def create_netcdf(user_args, df):
                     'long_name': 'Centered Time',
                     'standard_name': 'time',
                     'time_origin': '01-Jan-1970 0:00:00',
+                    'units': "seconds since 1970-01-01 00:00:00 UTC"
                 })
             }
         )
         
         
-        # Add NetCDF standard attributes
-        netcdf_grid = helper.add_netcdf_attrs(netcdf_grid, df)
+        # Set NetCDF standard attributes
+        metadata_nc = helper.set_metadata(user_args)
+        
+        
+        # Replace placeholders with real values
+        netcdf_grid.attrs.update(metadata_nc.attrs)
+        netcdf_grid.attrs['date_created'] = (
+            datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+            )
+        netcdf_grid.attrs['time_coverage_start'] = (
+            min_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+            )
+        netcdf_grid.attrs['time_coverage_end'] = (
+            max_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+            )
+        
         
         
         # Mapping data to the grid
@@ -446,8 +497,8 @@ def create_netcdf(user_args, df):
         # Ensure that these lines are executed even if an error occurs
         netcdf_grid.close()
         del netcdf_grid
-
-
+        
+        
 def main():
        
     # parse user arguments
