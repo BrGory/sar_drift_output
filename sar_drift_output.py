@@ -40,6 +40,39 @@ Copyright notice
 
 
 def read_arguments():
+    """
+    Parse and validate command-line arguments for the 
+    SAR Drift Output Generator.
+
+    This function uses the argparse module to define and parse 
+    command-line options needed for converting SAR drift data into NetCDF
+    and GeoPackage formats. It also validates the existence of required
+    input files and directories and returns a dictionary of user arguments.
+
+    Supported arguments:
+        -i, --input_filename: Path to the SAR drift input file (required).
+        -o, --output_dir: Directory where output files (.nc, .gpkg) 
+                          will be stored (default: "output").
+        -m, --metadata_dir: Directory containing the metadata CDL file
+                            (default: "meta").
+        -cdl, --cdl_filename: Name of the CDL file used to generate NetCDF
+                              metadata (default: "sar_drift_output.cdl").
+        -p, --precision: Number of decimal places to retain in calculations
+                         (default: 3).
+        -c, --compute: Flag to recalculate azimuth and distance instead
+                       of using original values.
+        -v, --verbose: Enable verbose output of parameter settings.
+
+    Returns:
+        dict: A dictionary (`user_args`) containing all validated and
+              normalized user inputs.
+
+    Exits:
+        The program will exit with status 1 if required inputs are missing
+        or paths do not exist.
+    """
+
+    
     import argparse
     import os
     import sys
@@ -169,6 +202,40 @@ def read_arguments():
 
 
 def read_input_file(user_args):
+    """
+    Load and preprocess SAR drift data from a CSV file.
+    
+    This function reads the specified SAR drift input file into a pandas
+    DataFrame, cleans and processes the data, computes derived time and
+    distance variables, and optionally recalculates azimuth and distance 
+    using geodesic methods.
+    
+    The function:
+    - Converts time fields from Julian seconds since 2000-01-01 to 
+      human-readable datetime strings.
+    - Filters out invalid records where the original bearing is 0.
+    - Optionally computes azimuth and distance using pyproj if requested
+      by the user.
+    - Computes displacement values (U, V) used in NetCDF output.
+    
+    Parameters:
+        user_args (dict): Dictionary of user arguments including:
+            - 'input_filename' (str): Path to the SAR drift `.txt` or 
+              `.csv` input file.
+            - 'compute' (bool): Whether to compute distance and bearing
+            using `helper.compute_bearing`.
+    
+    Returns:
+        pandas.DataFrame: Cleaned and enriched DataFrame with 
+        additional columns:
+            - Date1, Date2: human-readable timestamps
+            - Duration, JS_Duration: observation duration in both timedelta
+              and seconds
+            - Azimuth, Distance: direction and distance of drift
+              (calculated or original)
+            - U, V: Zonal and meridional displacements in kilometers
+    """
+
     import helper
     import pandas as pd
     from datetime import datetime, timedelta
@@ -240,6 +307,34 @@ def read_input_file(user_args):
 
 
 def create_shape_package(user_args, df):
+    """
+    Generate a GeoPackage (.gpkg) file with both point and line geometries from SAR drift data.
+
+    This function processes the cleaned SAR drift DataFrame to create:
+    - Point geometries representing the start location of drift observations
+    - Line geometries connecting start and end points of drift paths
+
+    It combines both geometry types into a single GeoDataFrame with a shared schema and
+    exports the result to a `.gpkg` file that can be visualized in GIS software like QGIS.
+
+    Parameters:
+        user_args (dict): Dictionary containing user input arguments, including:
+            - 'input_filename' (str): Path to the original SAR drift file (used to name the output)
+        df (pandas.DataFrame): DataFrame containing SAR drift data with required columns:
+            - 'Lon1', 'Lat1', 'Lon2', 'Lat2': Coordinates for start and end of drift
+
+    Returns:
+        None
+        
+    Output:
+        Saves a `.gpkg` file to the `output/` directory named after the input file.
+
+    Notes:
+        - CRS used is EPSG:4326 (WGS84 geographic coordinates)
+        - Output includes a `geometry_type` column to distinguish between 'point' and 'line'
+    """
+    
+    
     import os
     import pandas as pd
     import geopandas as gpd
@@ -292,6 +387,48 @@ def create_shape_package(user_args, df):
 
 
 def create_netcdf(user_args, df):
+    """
+    Generate a CF/ACDD-compliant NetCDF file from SAR drift data.
+
+    This function performs the following steps:
+    - Projects latitude/longitude coordinates into
+      EPSG:3413 (Polar Stereographic)
+    - Creates a 2D spatial grid at 12.5 km resolution over the bounding box
+      of drift data
+    - Initializes NetCDF variables for speed, U/V components, and bearing
+    - Extracts time metadata (min/max/mean) and maps to Unix epoch
+    - Loads metadata attributes from a CDL file via `ncgen` and
+      merges them with data
+    - Populates the grid by placing each observation into 
+      the appropriate grid cell
+    - Compresses and writes the result to a NetCDF `.nc` file
+
+    Parameters:
+        user_args (dict): Dictionary of user-specified arguments, including:
+            - 'input_filename': path to the SAR drift input file
+            - 'cdl_filename': path to the CDL metadata file
+            - 'metadata_dir': folder containing CDL and temporary NetCDF output
+        df (pandas.DataFrame): Cleaned SAR drift DataFrame containing:
+            - 'Lon1', 'Lat1', 'Lon2', 'Lat2': start/end positions
+            - 'Speed_kmdy', 'U_vel_ms', 'V_vel_ms', 'Bear_deg', 'Time1_JS':
+              input fields
+
+    Output:
+        Writes a NetCDF file to the output directory with compression enabled.
+
+    Notes:
+        - Uses `pyproj` for coordinate transformation and `xarray` for
+          NetCDF construction.
+        - Automatically replaces metadata placeholders like FILL_DATE_CREATED
+          and FILL_MIN_TIME.
+        - Duplicate observations in the same grid cell are skipped
+          with a warning.
+
+    Raises:
+        Exits the program if metadata generation from CDL fails.
+    """
+
+    
     import helper
     import os
     import numpy as np
@@ -500,6 +637,22 @@ def create_netcdf(user_args, df):
         
         
 def main():
+    """
+    Main execution workflow for converting SAR drift data to GeoPackage
+    and NetCDF formats.
+
+    This function:
+    - Parses command-line arguments
+    - Loads and preprocesses the SAR drift input file
+    - Generates a GeoPackage file containing point and line geometries for QGIS
+    - Generates a CF-compliant NetCDF file using metadata from a CDL template
+
+    The output files are saved to the specified output directory.
+
+    This function is intended to be executed when the script is run
+    as a standalone program.
+    """
+
        
     # parse user arguments
     user_args = read_arguments()

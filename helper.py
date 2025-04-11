@@ -180,6 +180,37 @@ def get_haversine(lat1, lon1, lat2, lon2, r_earth):
 
 
 def set_metadata(user_args):
+    """
+    Generate a NetCDF metadata template using a CDL file and load
+    it as an xarray.Dataset.
+    
+    This function takes the user-defined CDL (Common Data Language)
+    file path from the `user_args` dictionary, runs the `ncgen` 
+    command-line tool to convert it into a NetCDF (.nc) file,
+    and then loads that file into memory using `xarray`.
+    
+    The function is typically used to extract metadata
+    (attributes and structure) from a CDL file so that it can be applied
+    to a data-driven NetCDF file.
+    
+    Parameters:
+        user_args (dict): Dictionary containing user-provided arguments,
+        including:
+            - 'metadata_dir' (str): Path to the directory where CDL file
+                                    is stored.
+            - 'cdl_filename' (str): Path to the CDL file 
+                                    (usually in the metadata directory).
+    
+    Returns:
+        xarray.Dataset: A dataset containing only metadata
+                        from the generated NetCDF file.
+    
+    Raises:
+        SystemExit: If the `ncgen` command fails or
+                    returns a non-zero status code.
+    """
+
+
     import os
     import subprocess
     from datetime import datetime
