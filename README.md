@@ -48,7 +48,7 @@ conda activate sar_drift
 
 You also need `ncgen` from the [NetCDF-C tools](https://www.unidata.ucar.edu/software/netcdf/) for CDL file parsing.
 ```bash
-conda install -c conda-forge netcdf-c netcdf4 nco
+conda install -c conda-forge netcdf-c nco
 ncgen -h
 ncdump -h
 ncks --version
