@@ -57,6 +57,8 @@ def read_arguments():
                             (default: "meta").
         -cdl, --cdl_filename: Name of the CDL file used to generate NetCDF
                               metadata (default: "sar_drift_output.cdl").
+        -d, --delimiter: Character that separates the fields.
+                         (default: ',')
         -p, --precision: Number of decimal places to retain in calculations
                          (default: 3).
         -c, --compute: Flag to recalculate azimuth and distance instead
@@ -112,6 +114,16 @@ def read_arguments():
         default='sar_drift_output.cdl', type=str,
         action='store',
         help='Directory where CDL file (metadata) is stored.')
+    
+        
+    # Precison argument
+    parser.add_argument(
+        '-d', '--delimiter',
+        default=',', type=str,
+        action='store',
+        help="Delimiter character passed in quotes (`''` or `\"\"`). "
+             "For tab delimiter, enter '\\t'. "
+        )
     
     # Precison argument
     parser.add_argument(
@@ -172,6 +184,7 @@ def read_arguments():
         'output_dir': os.path.normpath(os.path.join(args.output_dir)),
         'metadata_dir': os.path.normpath(os.path.join(args.metadata_dir)),
         'cdl_filename': cdl_filename,
+        'delimiter': args.delimiter,
         'precision': args.precision,
         'compute': args.compute,
         'verbose': args.verbose
@@ -187,7 +200,9 @@ def read_arguments():
         "  metadata directory -m:            "
         f"{user_args['metadata_dir']}\n"
         "  CDL file -cdl:                    "
-        f"{user_args['cdl_filename']}\n"        
+        f"{user_args['cdl_filename']}\n"       
+        "  delimiter (-d):                   "
+        f"{user_args['delimiter']}\n" 
         "  precision (-p):                   "
         f"{user_args['precision']}\n"
         "  compute distance and bearing -c:  "
@@ -243,7 +258,8 @@ def read_input_file(user_args):
 
     # Read the SAR drift data file
     df = pd.read_csv(
-        user_args['input_filename'], delimiter=',', header=0
+        user_args['input_filename'],
+        delimiter=user_args['delimiter'], header=0
         )
     df.columns = df.columns.str.strip()
 

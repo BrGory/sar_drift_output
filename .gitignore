@@ -14,5 +14,6 @@ __pycache__
 
 # Output files
 output
+overlays
 **/*.gpkg
 **/*.nc
