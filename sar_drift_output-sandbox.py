@@ -413,9 +413,6 @@ def create_shape_package(user_args, df):
     
     print(f"GeoPackage <{output_file_path}> created")
 
-    gdf_start = gdf_start['geometry_start']
-    gdf_line = gdf_line['geometry_line']
-    
     return gdf_start, gdf_line
 
 
@@ -668,221 +665,494 @@ def create_netcdf(user_args, df):
         netcdf_grid.close()
         del netcdf_grid
         
+ 
+def patch_crs_and_bounds(src_path, extent, assumed_crs="EPSG:4326"):
+    import rasterio
+    from rasterio.transform import from_bounds
+    from rasterio.io import MemoryFile
+    from rasterio.crs import CRS
+
+    with rasterio.open(src_path) as src:
+        data = src.read(1)
+        height, width = data.shape
+        min_lon, max_lon, min_lat, max_lat = extent
+
+        # Create geotransform from bounds
+        transform = from_bounds(min_lon, min_lat, max_lon, max_lat, width, height)
+        crs = CRS.from_string(assumed_crs)
+
+        meta = src.meta.copy()
+        meta.update({
+            "crs": crs,
+            "transform": transform,
+            "width": width,
+            "height": height
+        })
+
+        memfile = MemoryFile()
+        with memfile.open(**meta) as dst:
+            dst.write(data, 1)
+        return memfile
+
+
+def reproject_to_3413(src_path, dst_crs="EPSG:3413"):
+    import rasterio
+    from rasterio.warp import calculate_default_transform, reproject, Resampling
+    from rasterio.io import MemoryFile
+    from rasterio.crs import CRS
+
+    with rasterio.open(src_path) as src:
+        src_crs = CRS.from_string("EPSG:4326")
+        src_transform = src.transform
+        src_width = src.width
+        src_height = src.height
+        data = src.read(1)
+
+        dst_crs = CRS.from_string(dst_crs)
+
+        # Calculate optimal transform and shape for the destination CRS
+        dst_transform, dst_width, dst_height = calculate_default_transform(
+            src_crs, dst_crs, src_width, src_height, *src.bounds
+        )
+
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': dst_crs,
+            'transform': dst_transform,
+            'width': dst_width,
+            'height': dst_height
+        })
+
+        memfile = MemoryFile()
+        with memfile.open(**kwargs) as dst:
+            reproject(
+                source=data,
+                destination=rasterio.band(dst, 1),
+                src_transform=src_transform,
+                src_crs=src_crs,
+                dst_transform=dst_transform,
+                dst_crs=dst_crs,
+                resampling=Resampling.bilinear
+            )
+        return memfile
+    
+    
+def overlay_with_cartopy(user_args, df, gdf_points, gdf_lines, output_png):
+    import os
+    import rasterio
+    from rasterio.io import MemoryFile
+    from rasterio.transform import Affine
+    from rasterio.crs import CRS
+    import rasterio.plot
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    
+    # Step 1: Open original GeoTIFF
+    geotiff_path = os.path.normpath(user_args['geotiff_filename'])
+    with rasterio.open(geotiff_path) as src:
+        data = src.read()
+        meta = src.meta.copy()
+    
+    # Step 2: Patch CRS and transform in memory
+    meta.update({
+        'crs': CRS.from_epsg(4326),
+        'transform': Affine.translation(-135.89, 73.6) * Affine.scale(0.0319, -0.009)
+    })
+    
+    memfile = MemoryFile()
+    
+    # Write into the memory file
+    with memfile.open(**meta) as dataset_writer:
+        dataset_writer.write(data)
+    
+    # Step 3: Re-open memory file for reading (critical!)
+    with memfile.open() as dataset_reader:
+        proj = ccrs.epsg(3413)
+        fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': proj})
+    
+        # Plot raster
+        rasterio.plot.show(
+            dataset_reader,
+            ax=ax,
+            transform=ccrs.PlateCarree(),
+            cmap='gray',
+            origin='upper'
+        )
+    
+        # Set map extent around raster
+        bounds = dataset_reader.bounds
+        ax.set_extent([bounds.left, bounds.right, bounds.bottom, bounds.top], crs=ccrs.PlateCarree())
+    
+        # Reproject and plot vector data
+        gdf_points_3413 = gdf_points.to_crs(epsg=3413)
+        gdf_lines_3413 = gdf_lines.to_crs(epsg=3413)
+    
+        gdf_points_3413.plot(ax=ax, transform=proj, color='red', markersize=30, label='Start Points')
+        gdf_lines_3413.plot(ax=ax, transform=proj, color='blue', linewidth=1, label='Drift Lines')
+    
+        ax.set_title("Drift Vectors Overlaid on SAR GeoTIFF (Zoomed)")
+        ax.gridlines(draw_labels=True)
+        ax.legend()
+    
+
+    #     plt.savefig(output_png, dpi=300)
+        plt.show()
+
+"""
+At 73.6°N, 1 degree longitude is shorter because of Earth's shape.
+But latitude degrees are roughly constant: about 111 km per degree.
+
+Approximate degree/pixel for latitude:
+pixel_size_lat=12.5111≈0.1126∘
+pixel_size_lat=11112.5​≈0.1126∘
+
+(12.5 km / 111 km ≈ 0.1126 degrees per pixel)
+
+Longitude is trickier because it shrinks by cos(latitude):
+pixel_size_lon=12.5111×cos⁡(73.6∘)
+pixel_size_lon=111×cos(73.6∘)12.5​
+
+import numpy as np
+lon_scale = 12.5 / (111 * np.cos(np.deg2rad(73.6)))
+print(lon_scale)
+
+0.4166 degrees per pixel (approximately)
+
+"""
+
+
+def patch_and_reproject_in_memory(
+    geotiff_path, 
+    lon, lat, 
+    pixel_x, pixel_y, 
+    target_crs='EPSG:3413'
+):
+    """
+    Patch a GeoTIFF missing CRS and transform, then reproject it in memory.
+
+    Args:
+        geotiff_path (str): Path to the original GeoTIFF file (missing metadata).
+        lon (float): Longitude of top-left corner (in degrees).
+        lat (float): Latitude of top-left corner (in degrees).
+        pixel_x (float): Pixel size in x-direction (longitude degrees per pixel).
+        pixel_y (float): Pixel size in y-direction (latitude degrees per pixel, usually negative).
+        target_crs (str): Target CRS for reprojection (default EPSG:3413).
+
+    Returns:
+        MemoryFile: A rasterio memory file object with the corrected and reprojected raster.
+    """
+    import rasterio
+    from rasterio.io import MemoryFile
+    from rasterio.transform import Affine
+    from rasterio.crs import CRS
+    from rasterio.warp import calculate_default_transform, reproject, Resampling
+    
+    # Step 1: Open original GeoTIFF
+    with rasterio.open(geotiff_path) as src:
+        data = src.read()
+        meta = src.meta.copy()
+    
+    # Step 2: Patch missing CRS and transform (assume EPSG:4326)
+    meta.update({
+        'crs': CRS.from_epsg(4326),
+        'transform': Affine.translation(lon, lat) * Affine.scale(pixel_x, pixel_y)
+    })
+
+    # Step 3: Write patched version into memory
+    patched_memfile = MemoryFile()
+    with patched_memfile.open(**meta) as dst:
+        dst.write(data)
+    
+    # Step 4: Re-open patched memory file and reproject
+    with patched_memfile.open() as src:
+        dst_crs = CRS.from_string(target_crs)
+        transform, width, height = calculate_default_transform(
+            src.crs, dst_crs, src.width, src.height, *src.bounds)
+
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': dst_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+
+        reprojected_memfile = MemoryFile()
+        with reprojected_memfile.open(**kwargs) as dst:
+            reproject(
+                source=rasterio.band(src, 1),
+                destination=rasterio.band(dst, 1),
+                src_transform=src.transform,
+                src_crs=src.crs,
+                dst_transform=transform,
+                dst_crs=dst_crs,
+                resampling=Resampling.bilinear
+            )
+    
+    # Step 5: Return the reprojected memory file
+    return reprojected_memfile
+
+def overlay_geotiff(user_args, gdf_points, gdf_lines):
+    import matplotlib.pyplot as plt
+    import rasterio
+    import rasterio.plot
+    import cartopy.crs as ccrs
+    
+    # Patch and reproject your SAR image safely in memory
+    memfile = patch_and_reproject_in_memory(
+        geotiff_path=user_args['geotiff_filename'],
+        lon=-135.89,
+        lat=73.6,
+        pixel_x=0.0319,
+        pixel_y=-0.009,
+        target_crs='EPSG:3413'
+    )
+    
+    # Now open and plot
+    with memfile.open() as dataset_reader:
+        fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': ccrs.epsg(3413)})
+    
+        rasterio.plot.show(
+            dataset_reader,
+            ax=ax,
+            transform=ccrs.epsg(3413),
+            cmap='gray',
+            origin='upper'
+        )
+    
+        # Set extent based on raster bounds
+        bounds = dataset_reader.bounds
+        ax.set_extent([bounds.left, bounds.right, bounds.bottom, bounds.top], crs=ccrs.epsg(3413))
+    
+        # Reproject and overlay vector data if you have it!
+        gdf_points_3413 = gdf_points.to_crs(epsg=3413)
+        gdf_lines_3413 = gdf_lines.to_crs(epsg=3413)
+    
+        gdf_points_3413.plot(ax=ax, transform=ccrs.epsg(3413), color='red', markersize=30)
+        gdf_lines_3413.plot(ax=ax, transform=ccrs.epsg(3413), color='blue', linewidth=1)
+    
+        ax.set_title("Drift Vectors Overlaid on Reprojected SAR GeoTIFF")
+        ax.gridlines(draw_labels=True)
+    
+        plt.show()
+
+
+def overlay_raster_with_drift(user_args, gdf_points, gdf_lines):
+    import os
+    import rioxarray as rxr
+    import matplotlib.pyplot as plt
+
+    geotiff_path = os.path.normpath(user_args['geotiff_filename'])
+    rds = rxr.open_rasterio(geotiff_path, masked=True)
+    rds.plot()
+    plt.show()
+      
 
 def create_netcdf_from_geotiff(geotiff_path, output_path, gdf_points, gdf_lines):
+    """
+    Converts a grayscale GeoTIFF image into a CF-compliant NetCDF file in EPSG:3413.
+
+    Parameters:
+        geotiff_path (str): Path to the input GeoTIFF file.
+        output_path (str): Output NetCDF file path.
+
+    Notes:
+        - Reprojects data to EPSG:3413 (Polar Stereographic North).
+        - Pixel value 255 is mapped to 0.
+        - Pixel values are stored as 'sea_ice_flag' in the NetCDF.
+    """
     import rasterio
     import numpy as np
     import xarray as xr
-    from pyproj import Transformer
-    from scipy.ndimage import zoom
+    from rasterio.warp import calculate_default_transform, reproject, Resampling
+    from rasterio.enums import Resampling
+    from rasterio.io import MemoryFile
     from datetime import datetime
-    import matplotlib.pyplot as plt
+    from pyproj import CRS
 
-    gdf_points = gdf_points.to_crs("EPSG:3413")
-    gdf_lines = gdf_lines.to_crs("EPSG:3413")
-
-    # read original GeoTIFF (grayscale image)
+    # Open GeoTIFF
     with rasterio.open(geotiff_path) as src:
-        geotiff_data = src.read(1)
-        original_data = geotiff_data
+        geotiff_data = src.read(1)  # Read band 1
+        width = src.width
+        height = src.height
 
 
-    # determine bounds of reprojected vector geometries
-    buffer_km = 5.0  # Add buffer around SAR region
-    buffer_m = buffer_km * 1000
+        ### SET BOUNDS BASED ON GEOTIFF ###
+        # calculate lon/lat based on affine
+        # lon_center = -136.0
+        # lat_center = 73.5
+        # pixel_size_deg = 1/111.32
+        
+        # # Compute top-left corner from center
+        # lon0 = lon_center - (width / 2) * pixel_size_deg
+        # lat0 = lat_center + (height / 2) * pixel_size_deg  # because y increases downward in array
 
-    minx = min(gdf_points.total_bounds[0], gdf_lines.total_bounds[0]) - buffer_m
-    maxx = max(gdf_points.total_bounds[2], gdf_lines.total_bounds[2]) + buffer_m
-    miny = min(gdf_points.total_bounds[1], gdf_lines.total_bounds[1]) - buffer_m
-    maxy = max(gdf_points.total_bounds[3], gdf_lines.total_bounds[3]) + buffer_m
+        # lon = np.array([lon0 + i * pixel_size_deg for i in range(width)])
+        # lat = np.array([lat0 - i * pixel_size_deg for i in range(height)])
+        
+        # # Flip vertically to match NetCDF axis conventions
+        # geotiff_data = np.flipud(geotiff_data)
+        # lat = lat[::-1]
+        ####################################
+        
+        
+        ### SET BOUNDS BASED ON SHAPE GEOMETRIES ###
+        # # 1. Get union of bounds from both point and line geometries
+        # buffer_deg = 5.0 # degrees
+        # minx = min(gdf_points.total_bounds[0], gdf_lines.total_bounds[0]) - buffer_deg
+        # maxx = max(gdf_points.total_bounds[2], gdf_lines.total_bounds[2]) + buffer_deg
+        # miny = min(gdf_points.total_bounds[1], gdf_lines.total_bounds[1]) - buffer_deg
+        # maxy = max(gdf_points.total_bounds[3], gdf_lines.total_bounds[3]) + buffer_deg
+        
+        # # 2. Define resolution in degrees (approx. 1km per pixel)
+        # pixel_size_deg = 1 / 111.32  # ~0.008983 degrees
+        
+        # # 3. Determine how many pixels to span this area
+        # width = int(np.ceil((maxx - minx) / pixel_size_deg))
+        # height = int(np.ceil((maxy - miny) / pixel_size_deg))
+        
+        # # 4. Set lon and lat axes from top-left
+        # lon = np.array([minx + i * pixel_size_deg for i in range(width)])
+        # lat = np.array([maxy - i * pixel_size_deg for i in range(height)])  # southward
+        
+        # # 5. Flip image vertically to match NetCDF
+        # geotiff_data = np.flipud(geotiff_data[:height, :width])
+        # lat = lat[::-1]
+        
+        
+        ### SIZE GEOTIFF TO GEOMETRIES BOUNDS ###
+        from scipy.ndimage import zoom
+        
+        # Assume this comes from your original GeoTIFF
+        original_data = geotiff_data  # shape: (orig_height, orig_width)
+        
+        # Define target output size
+        pixel_size_deg = 1 / 111.32  # ~0.008983 degrees per pixel
+        
+        # Get buffered bounding box from geometries
+        buffer_deg = .1
+        minx = min(gdf_points.total_bounds[0], gdf_lines.total_bounds[0]) - buffer_deg
+        maxx = max(gdf_points.total_bounds[2], gdf_lines.total_bounds[2]) + buffer_deg
+        miny = min(gdf_points.total_bounds[1], gdf_lines.total_bounds[1]) - buffer_deg
+        maxy = max(gdf_points.total_bounds[3], gdf_lines.total_bounds[3]) + buffer_deg
+        
+        # Target dimensions
+        target_width = int(np.ceil((maxx - minx) / pixel_size_deg))
+        target_height = int(np.ceil((maxy - miny) / pixel_size_deg))
+        
+        # Compute zoom factors (y, x)
+        zoom_factor_y = target_height / original_data.shape[0]
+        zoom_factor_x = target_width / original_data.shape[1]
+        
+        # Perform nearest-neighbor resizing (no interpolation)
+        resized_data = zoom(original_data, (zoom_factor_y, zoom_factor_x), order=0)
+        
+        # Flip vertically to match NetCDF convention
+        geotiff_data = np.flipud(resized_data)
+        # Longitude increases from left to right
+        lon = np.linspace(minx, maxx, target_width)
+        
+        # Latitude decreases from top to bottom → flip later for NetCDF
+        lat = np.linspace(maxy, miny, target_height)[::-1]
+        #############################################
 
 
-    # define target grid size and resolution
-    pixel_size_m = 1000  # 1 km per pixel
-    width = int(np.ceil((maxx - minx) / pixel_size_m))
-    height = int(np.ceil((maxy - miny) / pixel_size_m))
-
-
-    # resize raster data to match target resolution
-    zoom_factor_y = height / original_data.shape[0]
-    zoom_factor_x = width / original_data.shape[1]
-    resized_data = zoom(original_data, (zoom_factor_y, zoom_factor_x), order=0)  # nearest neighbor
-
-
-    # build x/y coordinate arrays (EPSG:3413 meters)
-    x = np.linspace(minx, maxx, width)
-    y = np.linspace(maxy, miny, height)[::-1]  # Southward with flip for NetCDF
-
-
-    # flip image vertically to match NetCDF conventions
-    geotiff_data = np.flipud(resized_data)
-
-
-    # replace 255 with 0
+    # Replace 255 with 0
     geotiff_data = np.where(geotiff_data == 255, 0, geotiff_data)
 
-
-    # create xarray Dataset
+    # Create xarray Dataset
     ds = xr.Dataset(
         {
-            'sea_ice_flag': (('y', 'x'), geotiff_data.astype(np.uint8), {
+            'sea_ice_flag': (('lat', 'lon'), geotiff_data.astype(np.uint8), {
                 'long_name': 'Sea ice presence flag',
                 'flag_values': [0, 1],
                 'flag_meanings': 'sea_ice land_or_water',
                 'units': '1',
                 'grid_mapping': 'polar_stereographic'
-            })
+                })
+
         },
         coords={
-            'x': ('x', x, {'units': 'meters', 'standard_name': 'projection_x_coordinate'}),
-            'y': ('y', y, {'units': 'meters', 'standard_name': 'projection_y_coordinate'})
+            'lon': ('lon', lon, {'units': 'degrees_east', 'standard_name': 'longitude'}),
+            'lat': ('lat', lat, {'units': 'degrees_north', 'standard_name': 'latitude'}),
         },
         attrs={
-            'title': 'Reprojected SAR Sea Ice Raster',
-            'summary': 'GeoTIFF resized and aligned with SAR vector data in EPSG:3413',
-            'institution': 'NOAA',
-            'source': 'Sentinel-1 SAR HH polarization',
-            'date_created': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'Conventions': 'CF-1.6 ACDD-1.3'
-        }
+            'grid_mapping_name': 'polar_stereographic',
+            'straight_vertical_longitude_from_pole': -45.0,
+            'latitude_of_projection_origin': 90.0,
+            'standard_parallel': 70.0,
+            'false_easting': 0.0,
+            'false_northing': 0.0,
+            'units': 'm',
+            'semi_major_axis': 6378137.0,
+            'inverse_flattening': 298.257223563,
+            'epsg_code': 'EPSG:3413'
+            }
     )
-    
-    # lines layer
-    # Convert each LineString to array of (x, y) points
-    lines_xy = [np.array(line.coords) for line in gdf_lines]
-    
-    # Pad to uniform length (NaN fill)
-    max_points = max(len(line) for line in lines_xy)
-    num_lines = len(lines_xy)
-    
-    drift_x = np.full((num_lines, max_points), np.nan)
-    drift_y = np.full((num_lines, max_points), np.nan)
-    
-    for i, coords in enumerate(lines_xy):
-        drift_x[i, :len(coords)] = coords[:, 0]  # x = easting
-        drift_y[i, :len(coords)] = coords[:, 1]  # y = northing
-    
-    # Add to xarray Dataset
-    ds['drift_lines_x'] = (('line', 'point'), drift_x, {
-        'units': 'meters',
-        'standard_name': 'projection_x_coordinate',
-        'long_name': 'Drift line easting (x)'
-    })
-    ds['drift_lines_y'] = (('line', 'point'), drift_y, {
-        'units': 'meters',
-        'standard_name': 'projection_y_coordinate',
-        'long_name': 'Drift line northing (y)'
-    })
 
-
-    # starting points layer
-    # Extract x and y coordinates directly
-    start_x = [point.x for point in gdf_points]
-    start_y = [point.y for point in gdf_points]
-    
-    # Add to xarray Dataset as 1D variables
-    ds['starting_x'] = (('start',), start_x, {
-        'units': 'meters',
-        'standard_name': 'projection_x_coordinate',
-        'long_name': 'Starting point easting (x)'
-    })
-    ds['starting_y'] = (('start',), start_y, {
-        'units': 'meters',
-        'standard_name': 'projection_y_coordinate',
-        'long_name': 'Starting point northing (y)'
-    })
-
-
-    # add CF grid_mapping variable for EPSG:3413
-    # TODO: use CDF file
-    ds['polar_stereographic'] = xr.DataArray(0, attrs={
-        'grid_mapping_name': 'polar_stereographic',
-        'straight_vertical_longitude_from_pole': -45.0,
-        'latitude_of_projection_origin': 90.0,
-        'standard_parallel': 70.0,
-        'false_easting': 0.0,
-        'false_northing': 0.0,
-        'semi_major_axis': 6378137.0,
-        'inverse_flattening': 298.257223563,
-        'units': 'm',
-        'epsg_code': 'EPSG:3413'
-    })
-
-    # save to NetCDF
+    # Encoding with compression
     encoding = {
         'sea_ice_flag': {
             'zlib': True,
             'complevel': 4,
             'dtype': 'uint8'
-        },
-        'drift_lines_x': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
-        },
-        'drift_lines_y': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
-        },
-        'starting_x': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
-        },
-        'starting_y': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
         }
     }
 
-
     ds.to_netcdf(output_path, encoding=encoding)
-    print(f'✅ NetCDF written to: {output_path}')
-
-    # Step 12: Plot raster + vectors (in EPSG:3413)
-    fig, ax = plt.subplots(figsize=(12, 12))
+    print(f'NetCDF written to {output_path}')
     
-    # 1. Plot the sea ice flag raster
-    ds['sea_ice_flag'].plot(
-        ax=ax,
-        cmap='gray',
-        cbar_kwargs={'label': 'Sea Ice Flag'}
-    )
+    import matplotlib.pyplot as plt
     
-    # 2. Plot drift lines (as dashed red lines)
-    for i, (x, y) in enumerate(zip(ds['drift_lines_x'].values, ds['drift_lines_y'].values)):
-        ax.plot(
-            x,
-            y,
-            linestyle='--',
-            color='red',
-            label='displacement' if i == 0 else None,
-            linewidth=1,
-            alpha=0.9
-        )
+    fig, ax = plt.subplots(figsize=(16, 16))
+    quadmesh = ds['sea_ice_flag'].plot(ax=ax, cmap='gray', cbar_kwargs={'label': 'Sea Ice Flag'})
+    gdf_lines = gdf_lines.to_crs("EPSG:4326")
+    gdf_points = gdf_points.to_crs("EPSG:4326")
+    gdf_lines.plot(ax=ax, color='cyan', linewidth=1, label='Drift Vectors')
+    gdf_points.plot(ax=ax, color='red', markersize=10, label='Start Points')
     
-    # 3. Plot starting points (as green outlined circles)
-    ax.scatter(
-        ds['starting_x'].values,
-        ds['starting_y'].values,
-        facecolors='none',
-        edgecolors='lime',
-        s=40,
-        linewidths=1.5,
-        label='Start Points'
-    )
-    
-    # 4. Optional styling
-    ax.set_title('Sea Ice Raster with Drift Vectors and Start Points (EPSG:3413)')
     ax.set_aspect('equal')
-    ax.legend()
+    ax.set_title('Sea Ice Flag (EPSG:4326)')
+    
+    # x_ticks = np.arange(-145, -135, 1.0)
+    # y_ticks = np.arange(70, 75, 1.0)
+    x_ticks = np.arange(
+        gdf_points.total_bounds[0],
+        gdf_points.total_bounds[2],
+        1.0
+    )
+    y_ticks = np.arange(
+        gdf_points.total_bounds[1],
+        gdf_points.total_bounds[3],
+        1.0
+    )
+
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels([f'{x:.1f}°' for x in x_ticks], rotation=45, ha='right')
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels([f'{y:.1f}°' for y in y_ticks])
+    
     plt.tight_layout()
     plt.show()
-
-    # print(gdf_lines.head(10))
-        
+    
+    
+    print("Raster extent:")
+    print(f"  lon: {ds.lon.values.min()} to {ds.lon.values.max()}")
+    print(f"  lat: {ds.lat.values.min()} to {ds.lat.values.max()}")
+    
+    print("Vector extent:")
+    print(gdf_points.total_bounds)  # (minx, miny, maxx, maxy)
+    
+    # gdf_points['lon'] = gdf_points.geometry.x
+    # gdf_points['lat'] = gdf_points.geometry.y
+    
+    # print(f"GDF Points: {gdf_points[['lon', 'lat']].head(10)}")
+    
+    # lon2d, lat2d = np.meshgrid(ds['lon'].values, ds['lat'].values)
+    # coords = list(zip(lon2d.ravel(), lat2d.ravel()))
+    # print(f"NetCDF Values: {coords[:10]}")
+    
+    
 def main():
     """
     Main execution workflow for converting SAR drift data to GeoPackage
@@ -910,13 +1180,24 @@ def main():
     # Create shape file package for QGIS    
     gdf_points, gdf_lines = create_shape_package(user_args, df)
 
+    # Overlay shapefile on GeoTIFF
+    # overlay_gdf_on_geotiff(user_args, gdf, 'overlay.png')
+    # overlay_with_cartopy(user_args, df, gdf_points, gdf_lines, 'overlay.png')
+    # overlay_geotiff(user_args, gdf_points, gdf_lines)
+    # overlay_raster_with_drift(user_args, gdf_points, gdf_lines)
+    
     # Create NetCDF file for QGIS    
     # create_netcdf(user_args, df)
+    
+   
+    import geotiff2netcdf as g2n
     import os
     geotiff_path = os.path.normpath(user_args['geotiff_filename'])
-    output_path = os.path.join(user_args['output_dir'], 'from_geotiff.nc')
-    create_netcdf_from_geotiff(geotiff_path, output_path, gdf_points, gdf_lines)
-        
+    # g2n.convert(user_args, gdf_points, gdf_lines)
+    # g2n.vectors_on_geotiff(user_args, gdf_points, gdf_lines)
+    # g2n.read_geotiff(user_args)
+    g2n.plot_shapes_on_geotiff_enhanced(geotiff_path, gdf_points, gdf_lines)
+    
     print('done')
 
     

@@ -79,7 +79,8 @@ def compute_bearing(
     
     # Return the calculated forward azimuth, back azimuth, and distance
     return fwd_azimuth, distance 
-    
+   
+ 
 def compute_r_earth(latitude):
     """Computes the local Earth radius at a given latitude in degrees.
 
