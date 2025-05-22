@@ -8,7 +8,7 @@ This project converts daily SAR-derived sea ice drift data into GIS-ready format
 - **NetCDF (`.nc`)**: CF/ACDD-compliant output including spatial grid of drift vectors (`dx`, `dy`), speed, and bearing.
 - **PNG Plot (`.png`)**: High-resolution plot showing the SAR backscatter image with drift vectors and an overview map of the Arctic region.
 
-The tool supports data visualization in QGIS and other NetCDF/GIS software, and it aligns SAR imagery with derived vector data using EPSG:3413 (NSIDC Sea Ice Polar Stereographic North).
+The tool supports data visualization in QGIS and other NetCDF/GIS software, and it aligns SAR imagery with derived vector data using EPSG:3413 (NSIDC Sea Ice Polar Stereographic North). Place the input SAR drift file and geotiff file in the input directory of your choice. The script will locate the GeoTIFF and SAR drift data in the directory and dynamically create a GeoPackage (for GIS software), a NetCDF file and a png file. These files show the SAR drift data as vectors with magnitude and direction disaplying on top of the supplied GeoTIFF image.
 
 ---
 
