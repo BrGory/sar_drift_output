@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 ******************************************************************************
 
@@ -50,8 +51,9 @@ def read_arguments():
     input files and directories and returns a dictionary of user arguments.
 
     Supported arguments:
-        -i, --input_filename: Path to the SAR drift input file (required).
+        -i, --input_dir: Path to the input files (required).
         -g, --geotiff file
+        -proj, --projection: EPSG projection to apply to data (3413 or 4326)
         -o, --output_dir: Directory where output files (.nc, .gpkg) 
                           will be stored (default: "output").
         -m, --metadata_dir: Directory containing the metadata CDL file
@@ -75,10 +77,10 @@ def read_arguments():
         or paths do not exist.
     """
 
-    
+    import util
     import argparse
     import os
-    import sys
+    import shutil
     
 
     parser = argparse.ArgumentParser(
@@ -87,20 +89,12 @@ def read_arguments():
     
     # Input filename argument
     parser.add_argument(
-        '-i', '--input_filename',
-        type=str,
+        '-i', '--input_dir',
+        default='input', type=str,
         action='store',
-        help='SAR drift file to be converted.'
+        help='Directory with all input files.'
         )
-    
-    # GeoTIFF file
-    parser.add_argument(
-        '-g', '--geotiff_filename',
-        type=str,
-        action='store',
-        help='Satellite image of sea ice'
-        )
-    
+       
     # Output directory argument
     parser.add_argument(
         '-o', '--output_dir',
@@ -116,22 +110,21 @@ def read_arguments():
         default='meta', type=str,
         action='store',
         help='Directory where CDL file (metadata) is stored.')
-    
-    # Metadata directory
+            
+    # Input file tye argument
     parser.add_argument(
-        '-cdl', '--cdl_filename',
-        default='sar_drift_output.cdl', type=str,
+        '-t', '--input_file_type',
+        default='txt', type=str,
         action='store',
-        help='Directory where CDL file (metadata) is stored.')
+        help="Delimited file type, e.g. CSV or TXT."
+        )
     
-        
     # Precison argument
     parser.add_argument(
         '-d', '--delimiter',
         default=',', type=str,
         action='store',
-        help="Delimiter character passed in quotes (`''` or `\"\"`). "
-             "For tab delimiter, enter '\t'. "
+        help="Delimiter character. For tab delimiter, enter \\t."
         )
     
     # Precison argument
@@ -141,13 +134,6 @@ def read_arguments():
         action='store',
         help="digits after decimal point"
         )
-
-    # Compute distance and bearing argument
-    parser.add_argument(
-        '-c', '--compute',
-        action='store_true',
-        help='Compute distance and bearing',        
-        )  
     
     # Verbosity argument
     parser.add_argument(
@@ -160,66 +146,50 @@ def read_arguments():
     # Read command line args.
     args = parser.parse_args()
 
-    if args.input_filename is None:
-        print(
-            'Please pass SAR drift file when calling script. '
-            'Use -h for help. <sar_drift_output.py -h>'
-            )
-        sys.exit(1)
-
-            
-    # Check the output directory exists
-    os.makedirs(args.output_dir, exist_ok=True)
-    
     # Check input file exists
-    if not os.path.exists(args.input_filename):
-        print(f"Cannot find {args.input_filename}")
-        sys.exit(1)        
+    input_dir = os.path.normpath(os.path.join(args.input_dir))
+    if not os.path.exists(input_dir):
+        util.error_msg(f"Cannot find input directory `{args.input_dir}`", 1)
         
     # Check metadata dir exists
-    if not os.path.exists(args.metadata_dir):
-        print(f"Cannot find {args.metadata_dir}")
-        sys.exit(1)
+    metadata_dir = os.path.normpath(os.path.join(args.metadata_dir))
+    if not os.path.exists(metadata_dir):
+        util.error_msg(f"Cannot find meatdata directory `{metadata_dir}`", 2)
         
-    # Check for CDL file
-    cdl_filename = os.path.join(args.metadata_dir, args.cdl_filename)
-    if not os.path.exists(cdl_filename):
-        print(f"Cannot find {cdl_filename}")
-        sys.exit(1) 
+        
+    # clear and create output directory
+    output_dir = os.path.normpath(os.path.join(args.output_dir))
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+        
     
-    
+    # initialize dictionary
     user_args = {
-        'input_filename': args.input_filename,
-        'geotiff_filename': args.geotiff_filename,
+        'input_dir': input_dir,
         'output_dir': os.path.normpath(os.path.join(args.output_dir)),
-        'metadata_dir': os.path.normpath(os.path.join(args.metadata_dir)),
-        'cdl_filename': cdl_filename,
+        'metadata_dir': metadata_dir,
+        'input_file_type': args.input_file_type,
         'delimiter': args.delimiter,
         'precision': args.precision,
-        'compute': args.compute,
         'verbose': args.verbose
     }
-        
-    
+            
+    # log settings
     param_string = (
         "CONF PARAMS:\n"
-        "  input file -i:                    "
-        f"{user_args['input_filename']}\n"
-        "  geotiff file -g:                  "
-        f"{user_args['geotiff_filename']}\n"        
+        "  input directory -i:               "
+        f"{user_args['input_dir']}\n"
         "  output directory -o:              "
         f"{user_args['output_dir']}\n"
         "  metadata directory -m:            "
         f"{user_args['metadata_dir']}\n"
-        "  CDL file -cdl:                    "
-        f"{user_args['cdl_filename']}\n"       
+        "  input file type (-t):             "
+        f"{user_args['input_file_type']}\n"         
         "  delimiter (-d):                   "
         f"{user_args['delimiter']}\n" 
         "  precision (-p):                   "
         f"{user_args['precision']}\n"
-        "  compute distance and bearing -c:  "
-        f"{user_args['compute']}\n"
-
     )
     if user_args['verbose'] is True:
         print(param_string)
@@ -228,661 +198,6 @@ def read_arguments():
     return user_args        
 
 
-def read_input_file(user_args):
-    """
-    Load and preprocess SAR drift data from a CSV file.
-    
-    This function reads the specified SAR drift input file into a pandas
-    DataFrame, cleans and processes the data, computes derived time and
-    distance variables, and optionally recalculates azimuth and distance 
-    using geodesic methods.
-    
-    The function:
-    - Converts time fields from Julian seconds since 2000-01-01 to 
-      human-readable datetime strings.
-    - Filters out invalid records where the original bearing is 0.
-    - Optionally computes azimuth and distance using pyproj if requested
-      by the user.
-    - Computes displacement values (U, V) used in NetCDF output.
-    
-    Parameters:
-        user_args (dict): Dictionary of user arguments including:
-            - 'input_filename' (str): Path to the SAR drift `.txt` or 
-              `.csv` input file.
-            - 'compute' (bool): Whether to compute distance and bearing
-            using `helper.compute_bearing`.
-    
-    Returns:
-        pandas.DataFrame: Cleaned and enriched DataFrame with 
-        additional columns:
-            - Date1, Date2: human-readable timestamps
-            - Duration, JS_Duration: observation duration in both timedelta
-              and seconds
-            - Azimuth, Distance: direction and distance of drift
-              (calculated or original)
-            - U, V: Zonal and meridional displacements in kilometers
-    """
-
-    import helper
-    import pandas as pd
-    from datetime import datetime, timedelta
-    
-
-    # Read the SAR drift data file
-    df = pd.read_csv(
-        user_args['input_filename'],
-        delimiter=user_args['delimiter'], header=0,
-        engine='python'
-        )
-    df.columns = df.columns.str.strip()
-    
-    
-    # Add the appropriate input file to a data frame
-    # Julian seconds start from date 01-01-2000
-    base_time = datetime(2000, 1, 1)
-
-    # Remove rows from Data Frame where orig_bearing = 0
-    # The values for these observations are incorrect
-    df = df[df['Bear_deg'] != 0]
-
-    # Create new Date* columnc by converting Time_JS* columns to datetime
-    df['Date1'] = df["Time1_JS"].apply(
-        lambda x: base_time + timedelta(seconds=x)
-        )
-    df['Date1'] = df['Date1'].dt.strftime('%Y-%m-%d %H:%M:%S')
-    df['Date2'] = df["Time2_JS"].apply(
-        lambda x: base_time + timedelta(seconds=x)
-        )
-    df['Date2'] = df['Date2'].dt.strftime('%Y-%m-%d %H:%M:%S')
-
-
-    # Calculate duration of observations
-    # 1. Date time
-    # 2. Raw Julian seconds
-    df['Duration'] = pd.to_timedelta(
-        df['Time2_JS'] - df['Time1_JS'], unit='s'
-        ).astype(str)
-    df['JS_Duration'] = (
-        df['Time2_JS'] - df['Time1_JS']
-        )
-
-
-    # Convert lon/lat to float
-    df['Lon1'] = df['Lon1'].astype(float)
-    df['Lat1'] = df['Lat1'].astype(float)
-    df['Lon2'] = df['Lon2'].astype(float)
-    df['Lat2'] = df['Lat2'].astype(float)
-    
-    # Standardize naming conventions if azimuth and distance
-    # are calculated or not
-    if user_args['compute']:
-        azimuth, distance = helper.compute_bearing(
-            df['Lat1'], df['Lon1'], df['Lat2'], df['Lon2']
-        )
-        df['Azimuth'] = azimuth
-        df['Distance'] = distance / 1000 # in km
-    else:
-        df['Azimuth'] = df['Bear_deg'].astype(float)
-        df['Distance'] = df['Speed_kmdy'].astype(float)
-        
-
-    # Get the zonal and meridional displacment used by NetCDF
-    df['U'] = (df['U_vel_ms'] * df['JS_Duration']) / 1000 # in km
-    df['V'] = (df['V_vel_ms'] * df['JS_Duration']) / 1000 # in km
-        
-        
-    return df
-
-
-def create_shape_package(user_args, df):
-    """
-    Generate a GeoPackage (.gpkg) file with both point and line geometries from SAR drift data.
-
-    This function processes the cleaned SAR drift DataFrame to create:
-    - Point geometries representing the start location of drift observations
-    - Line geometries connecting start and end points of drift paths
-
-    It combines both geometry types into a single GeoDataFrame with a shared schema and
-    exports the result to a `.gpkg` file that can be visualized in GIS software like QGIS.
-
-    Parameters:
-        user_args (dict): Dictionary containing user input arguments, including:
-            - 'input_filename' (str): Path to the original SAR drift file (used to name the output)
-        df (pandas.DataFrame): DataFrame containing SAR drift data with required columns:
-            - 'Lon1', 'Lat1', 'Lon2', 'Lat2': Coordinates for start and end of drift
-
-    Returns:
-        None
-        
-    Output:
-        Saves a `.gpkg` file to the `output/` directory named after the input file.
-
-    Notes:
-        - CRS used is EPSG:4326 (WGS84 geographic coordinates)
-        - Output includes a `geometry_type` column to distinguish between 'point' and 'line'
-    """
-    
-    
-    import os
-    import pandas as pd
-    import geopandas as gpd
-    from shapely.geometry import Point, LineString
-
-
-    # Create Point and Line Geometries
-    df['geometry_start'] = df.apply(
-        lambda row: Point((row['Lon1'], row['Lat1'])), axis=1
-        )
-    df['geometry_line'] = df.apply(
-        lambda row: LineString(
-            [(row['Lon1'], row['Lat1']), (row['Lon2'], row['Lat2'])]
-            ),
-        axis=1)
-    
-    # Create GeoDataFrame for start points (points only)
-    gdf_start = gpd.GeoDataFrame(
-        df, geometry='geometry_start', crs='EPSG:4326'
-        )
-    # Add a column to distinguish geometry type    
-    gdf_start['geometry_type'] = 'point'  
-    
-    # Create GeoDataFrame for lines (lines only)
-    gdf_line = gpd.GeoDataFrame(
-        df, geometry='geometry_line', crs='EPSG:4326'
-        )
-    # Add a column to distinguish geometry type    
-    gdf_line['geometry_type'] = 'line'  
-    
-    # Combine the two GeoDataFrames while retaining original fields
-    gdf_combined = pd.concat([
-        gdf_start.rename(columns={'geometry_start': 'geometry'}),
-        gdf_line.rename(columns={'geometry_line': 'geometry'})
-    ], ignore_index=True)
-    
-    # Recreate the GeoDataFrame with the common geometry column and the CRS
-    gdf_combined = gpd.GeoDataFrame(
-        gdf_combined, geometry='geometry', crs='EPSG:4326'
-        )
-    
-    # Save as a single GeoPackage file (supports mixed geometries)
-    inputfile_rootname = os.path.basename(user_args['input_filename'])
-    output_file_path = os.path.join(
-        "output", f"{inputfile_rootname}.gpkg"
-        )
-    gdf_combined.to_file(output_file_path, driver='GPKG')
-    
-    print(f"GeoPackage <{output_file_path}> created")
-
-    gdf_start = gdf_start['geometry_start']
-    gdf_line = gdf_line['geometry_line']
-    
-    return gdf_start, gdf_line
-
-
-def create_netcdf(user_args, df):
-    """
-    Generate a CF/ACDD-compliant NetCDF file from SAR drift data.
-
-    This function performs the following steps:
-    - Projects latitude/longitude coordinates into
-      EPSG:3413 (Polar Stereographic)
-    - Creates a 2D spatial grid at 12.5 km resolution over the bounding box
-      of drift data
-    - Initializes NetCDF variables for speed, U/V components, and bearing
-    - Extracts time metadata (min/max/mean) and maps to Unix epoch
-    - Loads metadata attributes from a CDL file via `ncgen` and
-      merges them with data
-    - Populates the grid by placing each observation into 
-      the appropriate grid cell
-    - Compresses and writes the result to a NetCDF `.nc` file
-
-    Parameters:
-        user_args (dict): Dictionary of user-specified arguments, including:
-            - 'input_filename': path to the SAR drift input file
-            - 'cdl_filename': path to the CDL metadata file
-            - 'metadata_dir': folder containing CDL and temporary NetCDF output
-        df (pandas.DataFrame): Cleaned SAR drift DataFrame containing:
-            - 'Lon1', 'Lat1', 'Lon2', 'Lat2': start/end positions
-            - 'Speed_kmdy', 'U_vel_ms', 'V_vel_ms', 'Bear_deg', 'Time1_JS':
-              input fields
-
-    Output:
-        Writes a NetCDF file to the output directory with compression enabled.
-
-    Notes:
-        - Uses `pyproj` for coordinate transformation and `xarray` for
-          NetCDF construction.
-        - Automatically replaces metadata placeholders like FILL_DATE_CREATED
-          and FILL_MIN_TIME.
-        - Duplicate observations in the same grid cell are skipped
-          with a warning.
-
-    Raises:
-        Exits the program if metadata generation from CDL fails.
-    """
-
-    
-    import helper
-    import os
-    import numpy as np
-    from datetime import datetime, timedelta
-    from pyproj import Transformer
-    import xarray as xr
-   
-    # Define grid resolution and bounds
-    resolution_km = 12.5  # Resolution in km
-    
-    # Define the polar stereographic projection (EPSG:3413)
-    transformer_to_meters = Transformer.from_crs(
-        "EPSG:4326", "EPSG:3413", always_xy=True
-        )
-    
-    # Convert lon/lat to x/y coordinates in meters
-    df['X1'], df['Y1'] = transformer_to_meters.transform(
-        df['Lon1'].values, df['Lat1'].values
-        )
-    df['X2'], df['Y2'] = transformer_to_meters.transform(
-        df['Lon2'].values, df['Lat2'].values
-        )
-    
-    # Get the absolute minimum and maximum for lat (Y) and lon (X)
-    min_x, max_x = df[['X1', 'X2']].min().min(), df[['X1', 'X2']].max().max()
-    min_y, max_y = df[['Y1', 'Y2']].min().min(), df[['Y1', 'Y2']].max().max()
-    
-    # Build the X and Y coordinates based on maximum and minimum
-    # with steps of resolution multiplied by 1000 km
-    x_coords = np.arange(min_x, max_x, resolution_km * 1000)
-    y_coords = np.arange(min_y, max_y, resolution_km * 1000)
-    
-    try:
-        # Create an empty grid
-        # (time, y, x)
-        grid_shape = (1, len(y_coords), len(x_coords))  
-        
-        # Time defaults
-        base_time = datetime(2000, 1, 1)
-        mean_time_js = df['Time1_JS'].mean()
-        time_val = base_time + timedelta(seconds=mean_time_js)
-        epoch = datetime(1970, 1, 1)
-        time_sec = (time_val - epoch).total_seconds()
-        min_time = base_time + timedelta(seconds=float(df['Time1_JS'].min()))
-        max_time = base_time + timedelta(seconds=float(df['Time1_JS'].max()))
-        
-        # time_array becomes:
-        time_array = np.array([time_sec], dtype='float64')
-        
-        netcdf_grid = xr.Dataset(
-            {
-                'Speed_kmdy': (('time', 'y', 'x'),
-                                np.full(grid_shape, np.nan),
-                                {
-                                    'long_name': "Speed in km/day",
-                            		'standard_name': "sea_ice_speed",
-                                    'ioos_category': (
-                                        "SAR daily sea-ice drift"
-                                        ),
-                                    'units': "km/day",
-                                    'grid_mapping': "spatial_ref"
-                                    }
-                                ),
-                'U_vel_ms': (('time', 'y', 'x'),
-                              np.full(grid_shape, np.nan),
-                              {
-                                  'long_name': 'Zonal Velocity',
-                                  'standard_name': 'movement_in_x_direction',
-                                  'ioos_category': 'SAR daily sea-ice drift',
-                                  'units': 'm/s',
-                                  'grid_mapping': 'spatial_ref'
-                                  }
-                              ),
-                'V_vel_ms': (('time', 'y', 'x'),
-                              np.full(grid_shape, np.nan),
-                              {
-                                  'long_name': 'Meridional Velocity',
-                                  'standard_name': 'movement_in_y_direction',
-                                  'ioos_category': 'SAR daily sea-ice drift',
-                                  'units': 'm/s',
-                                  'grid_mapping': 'spatial_ref'
-                                  }
-                              ),
-                'Bear_deg': (('time', 'y', 'x'),
-                              np.full(grid_shape, np.nan),
-                              {
-                                  'long_name': 'Bearing',
-                                  'standard_name': "direction_true_north",
-                                  'ioos_category': 'SAR daily sea-ice drift',
-                                  'units': 'degrees',
-                                  'grid_mapping': 'spatial_ref'
-                                  }
-                              )
-            },
-            # Add metadata to coords so QGIS can properly scale the map
-            coords={
-                'x': (('x',), x_coords,
-                      {
-                          'actual_range': (
-                              [float(x_coords.min()), float(x_coords.max())]
-                              ),
-                          'axis': 'X',
-                          'comment': (
-                              'x values are the centers of the grid cells'
-                              ),
-                          'ioos_category': 'Location',
-                          'long_name': 'x coordinate of projection',
-                          'standard_name': 'projection_x_coordinate',
-                          'units': 'm'
-                          }),
-                'y': (('y',), y_coords,
-                      {
-                          'actual_range': (
-                              [float(y_coords.min()), float(y_coords.max())]
-                              ),
-                          'axis': 'Y',
-                          'comment': (
-                              'y values are the centers of the grid cells'
-                              ),                          
-                          'ioos_category': 'Location',
-                          'long_name': 'y coordinate of projection',
-                          'standard_name': 'projection_x_coordinate',
-                          'units': 'm'
-                          }),
-                'time': (('time',), time_array, {
-                    'actual_range': (
-                        [float(time_array.min()), float(time_array.max())]
-                        ),
-                    'axis': 'T',
-                    'comment': (
-                        'This is the 00Z reference time. '
-                        'Note that products are nowcasted to be valid '
-                        'specifically at the time given here.'
-                        ),
-                    'CoordinateAxisType': 'Time',
-                    'ioos_category': 'Time',
-                    'long_name': 'Centered Time',
-                    'standard_name': 'time',
-                    'time_origin': '01-Jan-1970 0:00:00',
-                    'units': "seconds since 1970-01-01 00:00:00 UTC"
-                })
-            }
-        )
-        
-        
-        # Set NetCDF standard attributes
-        metadata_nc = helper.set_metadata(user_args)
-        
-        
-        # Replace placeholders with real values
-        netcdf_grid.attrs.update(metadata_nc.attrs)
-        netcdf_grid.attrs['date_created'] = (
-            datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-            )
-        netcdf_grid.attrs['time_coverage_start'] = (
-            min_time.strftime('%Y-%m-%dT%H:%M:%SZ')
-            )
-        netcdf_grid.attrs['time_coverage_end'] = (
-            max_time.strftime('%Y-%m-%dT%H:%M:%SZ')
-            )
-        
-        
-        
-        # Mapping data to the grid
-        index_mapping = {}
-        for _, row in df.iterrows():
-            # To get the i, j indices, we
-            x_idx = np.argmin(np.abs(x_coords - row['X1']))
-            y_idx = np.argmin(np.abs(y_coords - row['Y1']))
-            
-            # Create a unique key for each (i, j) pair
-            index_key = (y_idx, x_idx)
-            
-            # Check if this index already exists
-            if index_key in index_mapping:
-                print(f"Duplicate index detected at (i, j): {index_key}")
-            else:
-                # Store data in the grid
-                netcdf_grid['Speed_kmdy'][0, y_idx, x_idx] = row['Speed_kmdy']    
-                netcdf_grid['U_vel_ms'][0, y_idx, x_idx] = row['U_vel_ms']
-                netcdf_grid['V_vel_ms'][0, y_idx, x_idx] = row['V_vel_ms']
-                netcdf_grid['Bear_deg'][0, y_idx, x_idx] = row['Bear_deg']
-        
-        
-        # Save to NetCDF with compression level 4
-        inputfile_rootname = os.path.basename(user_args['input_filename'])
-        output_file_path = os.path.join(
-            "output", f"{inputfile_rootname}.nc"
-            )
-    
-        # Save to NetCDF with compression level 4
-        netcdf_grid.to_netcdf(output_file_path, mode='w', encoding={
-            'Speed_kmdy': {'zlib': True, 'complevel': 4},
-            'U_vel_ms': {'zlib': True, 'complevel': 4},
-            'V_vel_ms': {'zlib': True, 'complevel': 4},
-            'Bear_deg': {'zlib': True, 'complevel': 4}
-        })
-    
-        print(f'NetCDF <{output_file_path}> created')
-        
-        
-    finally:
-        # Ensure that these lines are executed even if an error occurs
-        netcdf_grid.close()
-        del netcdf_grid
-        
-
-def create_netcdf_from_geotiff(geotiff_path, output_path, gdf_points, gdf_lines):
-    import rasterio
-    import numpy as np
-    import xarray as xr
-    from pyproj import Transformer
-    from scipy.ndimage import zoom
-    from datetime import datetime
-    import matplotlib.pyplot as plt
-
-    gdf_points = gdf_points.to_crs("EPSG:3413")
-    gdf_lines = gdf_lines.to_crs("EPSG:3413")
-
-    # read original GeoTIFF (grayscale image)
-    with rasterio.open(geotiff_path) as src:
-        geotiff_data = src.read(1)
-        original_data = geotiff_data
-
-
-    # determine bounds of reprojected vector geometries
-    buffer_km = 5.0  # Add buffer around SAR region
-    buffer_m = buffer_km * 1000
-
-    minx = min(gdf_points.total_bounds[0], gdf_lines.total_bounds[0]) - buffer_m
-    maxx = max(gdf_points.total_bounds[2], gdf_lines.total_bounds[2]) + buffer_m
-    miny = min(gdf_points.total_bounds[1], gdf_lines.total_bounds[1]) - buffer_m
-    maxy = max(gdf_points.total_bounds[3], gdf_lines.total_bounds[3]) + buffer_m
-
-
-    # define target grid size and resolution
-    pixel_size_m = 1000  # 1 km per pixel
-    width = int(np.ceil((maxx - minx) / pixel_size_m))
-    height = int(np.ceil((maxy - miny) / pixel_size_m))
-
-
-    # resize raster data to match target resolution
-    zoom_factor_y = height / original_data.shape[0]
-    zoom_factor_x = width / original_data.shape[1]
-    resized_data = zoom(original_data, (zoom_factor_y, zoom_factor_x), order=0)  # nearest neighbor
-
-
-    # build x/y coordinate arrays (EPSG:3413 meters)
-    x = np.linspace(minx, maxx, width)
-    y = np.linspace(maxy, miny, height)[::-1]  # Southward with flip for NetCDF
-
-
-    # flip image vertically to match NetCDF conventions
-    geotiff_data = np.flipud(resized_data)
-
-
-    # replace 255 with 0
-    geotiff_data = np.where(geotiff_data == 255, 0, geotiff_data)
-
-
-    # create xarray Dataset
-    ds = xr.Dataset(
-        {
-            'sea_ice_flag': (('y', 'x'), geotiff_data.astype(np.uint8), {
-                'long_name': 'Sea ice presence flag',
-                'flag_values': [0, 1],
-                'flag_meanings': 'sea_ice land_or_water',
-                'units': '1',
-                'grid_mapping': 'polar_stereographic'
-            })
-        },
-        coords={
-            'x': ('x', x, {'units': 'meters', 'standard_name': 'projection_x_coordinate'}),
-            'y': ('y', y, {'units': 'meters', 'standard_name': 'projection_y_coordinate'})
-        },
-        attrs={
-            'title': 'Reprojected SAR Sea Ice Raster',
-            'summary': 'GeoTIFF resized and aligned with SAR vector data in EPSG:3413',
-            'institution': 'NOAA',
-            'source': 'Sentinel-1 SAR HH polarization',
-            'date_created': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'Conventions': 'CF-1.6 ACDD-1.3'
-        }
-    )
-    
-    # lines layer
-    # Convert each LineString to array of (x, y) points
-    lines_xy = [np.array(line.coords) for line in gdf_lines]
-    
-    # Pad to uniform length (NaN fill)
-    max_points = max(len(line) for line in lines_xy)
-    num_lines = len(lines_xy)
-    
-    drift_x = np.full((num_lines, max_points), np.nan)
-    drift_y = np.full((num_lines, max_points), np.nan)
-    
-    for i, coords in enumerate(lines_xy):
-        drift_x[i, :len(coords)] = coords[:, 0]  # x = easting
-        drift_y[i, :len(coords)] = coords[:, 1]  # y = northing
-    
-    # Add to xarray Dataset
-    ds['drift_lines_x'] = (('line', 'point'), drift_x, {
-        'units': 'meters',
-        'standard_name': 'projection_x_coordinate',
-        'long_name': 'Drift line easting (x)'
-    })
-    ds['drift_lines_y'] = (('line', 'point'), drift_y, {
-        'units': 'meters',
-        'standard_name': 'projection_y_coordinate',
-        'long_name': 'Drift line northing (y)'
-    })
-
-
-    # starting points layer
-    # Extract x and y coordinates directly
-    start_x = [point.x for point in gdf_points]
-    start_y = [point.y for point in gdf_points]
-    
-    # Add to xarray Dataset as 1D variables
-    ds['starting_x'] = (('start',), start_x, {
-        'units': 'meters',
-        'standard_name': 'projection_x_coordinate',
-        'long_name': 'Starting point easting (x)'
-    })
-    ds['starting_y'] = (('start',), start_y, {
-        'units': 'meters',
-        'standard_name': 'projection_y_coordinate',
-        'long_name': 'Starting point northing (y)'
-    })
-
-
-    # add CF grid_mapping variable for EPSG:3413
-    # TODO: use CDF file
-    ds['polar_stereographic'] = xr.DataArray(0, attrs={
-        'grid_mapping_name': 'polar_stereographic',
-        'straight_vertical_longitude_from_pole': -45.0,
-        'latitude_of_projection_origin': 90.0,
-        'standard_parallel': 70.0,
-        'false_easting': 0.0,
-        'false_northing': 0.0,
-        'semi_major_axis': 6378137.0,
-        'inverse_flattening': 298.257223563,
-        'units': 'm',
-        'epsg_code': 'EPSG:3413'
-    })
-
-    # save to NetCDF
-    encoding = {
-        'sea_ice_flag': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'uint8'
-        },
-        'drift_lines_x': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
-        },
-        'drift_lines_y': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
-        },
-        'starting_x': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
-        },
-        'starting_y': {
-            'zlib': True,
-            'complevel': 4,
-            'dtype': 'float32'
-        }
-    }
-
-
-    ds.to_netcdf(output_path, encoding=encoding)
-    print(f'✅ NetCDF written to: {output_path}')
-
-    # Step 12: Plot raster + vectors (in EPSG:3413)
-    fig, ax = plt.subplots(figsize=(12, 12))
-    
-    # 1. Plot the sea ice flag raster
-    ds['sea_ice_flag'].plot(
-        ax=ax,
-        cmap='gray',
-        cbar_kwargs={'label': 'Sea Ice Flag'}
-    )
-    
-    # 2. Plot drift lines (as dashed red lines)
-    for i, (x, y) in enumerate(zip(ds['drift_lines_x'].values, ds['drift_lines_y'].values)):
-        ax.plot(
-            x,
-            y,
-            linestyle='--',
-            color='red',
-            label='displacement' if i == 0 else None,
-            linewidth=1,
-            alpha=0.9
-        )
-    
-    # 3. Plot starting points (as green outlined circles)
-    ax.scatter(
-        ds['starting_x'].values,
-        ds['starting_y'].values,
-        facecolors='none',
-        edgecolors='lime',
-        s=40,
-        linewidths=1.5,
-        label='Start Points'
-    )
-    
-    # 4. Optional styling
-    ax.set_title('Sea Ice Raster with Drift Vectors and Start Points (EPSG:3413)')
-    ax.set_aspect('equal')
-    ax.legend()
-    plt.tight_layout()
-    plt.show()
-
-    # print(gdf_lines.head(10))
-        
 def main():
     """
     Main execution workflow for converting SAR drift data to GeoPackage
@@ -900,25 +215,103 @@ def main():
     as a standalone program.
     """
 
+    import util
+    import sar_drift as sd
+    import glob
+    from datetime import datetime
+    
        
+    # set timestamp for output files
+    timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+    
     # parse user arguments
     user_args = read_arguments()
     
+    from pyproj import Transformer
+    transformer = Transformer.from_crs(
+        "EPSG:4326", 
+        "+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 +x_0=0 +y_0=0"
+        " +datum=WGS84 +units=m +no_defs +type=crs",
+        always_xy=True
+    )
+    
+    import os        
+    # geotiff_path = os.path.normpath(user_args['geotiff_filename'])
+
+
+    # find SAR input file
+    input_dir = user_args['input_dir']
+    file_type = user_args['input_file_type']
+    input_files = glob.glob(os.path.join(input_dir, f"*.{file_type}"))
+    if not input_files:
+        util.error_msg(
+            f"No .{file_type} file found in input directory `{input_dir}`",
+            3
+        )
+    if len(input_files) > 1:
+        util.error_msg(
+            f"More than one .{file_type} file found in input directory"
+            f" `{input_dir}`:\n{input_files}",
+            4
+        )
+    sar_file = input_files[0]
+    sar_basename = os.path.basename(sar_file)
+    
+    
+    # find getiff file
+    tif_files = glob.glob(os.path.join(input_dir, '*.tif'))
+    if not tif_files:
+        util.error_msg(
+            f"No .tif file found in input directory `{input_dir}`",
+            5
+        )
+    if len(tif_files) > 1:
+        util.error_msg(
+            f"More than one .tif file found in input directory:\{tif_files}",
+            6
+        )
+    geotiff_file = tif_files[0]
+    
+    
+    # find cdl file
+    metadata_dir = user_args['metadata_dir']
+    cdl_files = glob.glob(os.path.join(metadata_dir, '*.cdl'))    
+    if not cdl_files:
+        util.error_msg(
+            f"No .cdl file found in metadata driectory `{metadata_dir}`",
+            7
+        )
+    if len(cdl_files) > 1:
+        util.error_msg(
+            "More than one .cdl file found in metadata directory:\n"
+            f"{cdl_files}",
+            8
+        )
+    cdl_file = cdl_files[0]
+
+                              
+        
     # Read SAR drift data file
-    df = read_input_file(user_args)
+    df_sar = sd.read_input_file(
+        sar_file, user_args['precision'], transformer, user_args
+    )
+
     
     # Create shape file package for QGIS    
-    gdf_points, gdf_lines = create_shape_package(user_args, df)
+    gdf_points, gdf_lines = sd.create_shape_package(
+        user_args, df_sar, transformer, timestamp
+    )
+
 
     # Create NetCDF file for QGIS    
-    # create_netcdf(user_args, df)
-    import os
-    geotiff_path = os.path.normpath(user_args['geotiff_filename'])
-    output_path = os.path.join(user_args['output_dir'], 'from_geotiff.nc')
-    create_netcdf_from_geotiff(geotiff_path, output_path, gdf_points, gdf_lines)
-        
-    print('done')
+    sd.create_netcdf(user_args, df_sar, transformer, timestamp, cdl_file)
 
+    
+    # Overlay SAR drift data vectors on geotiff image
+    sd.overlay_sar_drift_on_geotiff(
+        geotiff_file, gdf_lines, df_sar, timestamp, sar_basename, user_args
+    )
+    
     
 if __name__ == "__main__":
     main()

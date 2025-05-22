@@ -4,6 +4,7 @@
 **/*.csv
 **/*.xml
 **/*.xlsx
+**/*.bkp
 
 # Jupyter Notebook Checkpoints
 .ipynb_checkpoints/
@@ -18,3 +19,7 @@ overlays
 **/*.gpkg
 **/*.nc
 **/*.png
+
+# Ignored folders
+input
+misc

@@ -2,11 +2,13 @@
 
 ## Project Overview
 
-This project provides a tool to convert SAR drift data into:
-- `.gpkg` (GeoPackage) files for visualization in GIS tools like QGIS
-- `.nc` (NetCDF) files for scientific analysis and compliance with metadata standards
+This project converts daily SAR-derived sea ice drift data into GIS-ready formats:
 
-It supports Polar Stereographic projection (EPSG:3413) and includes metadata injection from CDL templates using `ncgen`.
+- **GeoPackage (`.gpkg`)**: Contains point and line geometries representing ice drift observations.
+- **NetCDF (`.nc`)**: CF/ACDD-compliant output including spatial grid of drift vectors (`dx`, `dy`), speed, and bearing.
+- **PNG Plot (`.png`)**: High-resolution plot showing the SAR backscatter image with drift vectors and an overview map of the Arctic region.
+
+The tool supports data visualization in QGIS and other NetCDF/GIS software, and it aligns SAR imagery with derived vector data using EPSG:3413 (NSIDC Sea Ice Polar Stereographic North).
 
 ---
 
@@ -53,8 +55,6 @@ ncgen -h
 ncdump -h
 ncks --version
 ```
-
-
 ---
 
 ## Metadata Injection via CDL
@@ -72,18 +72,16 @@ Ensure your `.cdl` file lives in a directory (default: `meta/`) and follows CF/A
 ## Running the Script
 
 ```bash
-python sar_drift_output.py -i <input_file> [options]
+python sar_drift_output.py [options]
 ```
 
-### Required arguments:
-- `-i`, `--input_filename`: Path to SAR drift `.txt` file
-
 ### Optional arguments:
-- `-o`, `--output_dir`: Directory for `.nc` and `.gpkg` output (default: `output`)
-- `-m`, `--metadata_dir`: Directory containing the CDL file (default: `meta`)
-- `-cdl`, `--cdl_filename`: CDL file name (default: `sar_drift_output.cdl`)
+- `-i`, `--input_filename`: Path to delimited data file and geotiff image (default: `input` in script directory)
+- `-o`, `--output_dir`: Directory for `.nc` and `.gpkg` output (default: `output` in script directory)
+- `-m`, `--metadata_dir`: Directory containing the CDL file (default: `meta` in script directory)
+- `-t`, `--input_file_type`: Extension of delimited input file (e.g. `txt` or `csv [not CaSe SeNsItIvE])
+- `-d`, `--delimiter`: Character that separates the fields in the input data file (default: `,` [use `\t` for tab])
 - `-p`, `--precision`: Decimal precision for numeric output (default: 3)
-- `-c`, `--compute`: Compute azimuth and distance using `pyproj` (vs. using original fields)
 - `-v`, `--verbose`: Verbose logging
 
 ### Example:
@@ -94,18 +92,49 @@ python sar_drift_output.py -i data/sample_drift.txt -c -v
 
 ---
 
+## Input Files
+- SAR Drift CSV: A .txt or .csv file with columns including:
+    -  Lon1, Lat1, Lon2, Lat2: start and end coordinates
+	-  Time1_JS, Time2_JS: Julian seconds since 2000-01-01
+    -  U_vel_ms, V_vel_ms: velocity components
+	-  Bear_deg, Speed_kmdy: bearing and speed
+- GeoTIFF Image: Raster product of SAR backscatter with GCPs
+- CDL File: Metadata template used to apply CF-compliant global and variable attributes to the NetCDF output
+	
 ## Output
-
-You will find:
-- A `.nc` file in the output directory, CF/ACDD-compliant
-- A `.gpkg` file with both point and line geometries for QGIS
+| Type                         | Description                                                         |
+| ---------------------------- | ------------------------------------------------------------------- |
+| `sar_drift_<timestamp>.gpkg` | QGIS GeoPackage with start points, end points, and drift lines      |
+| `sar_drift_<timestamp>.nc`   | CF/ACDD-compliant NetCDF with drift variables                       |
+|                              | (`dx`, `dy`, `Speed_kmdy`, `Bear_deg`)                              |
+| `sar_drift_<timestamp>.png`  | Annotated PNG showing SAR image and vector overlays                 |
+|							   |	  - Left: Arctic overview (Cartopy, EPSG:4326) with bounding box |
+|							   |	  - Right: SAR image overlaid with quiver arrows,                |
+|							   |        	   True North arrow, and scale bar                       |
 
 ---
 
 ## Notes
 
-- Metadata in the `.cdl` file must use valid CDL syntax and declare dimensions and attributes cleanly.
-- Placeholders like `FILL_DATE_CREATED` are automatically replaced based on the input file contents.
+- The NetCDF file uses EPSG:3413 with properly defined grid_mapping attributes.
+- GeoTIFF is reprojected using Ground Control Points (GCPs) via rasterio.
+- Vector drift observations are rendered using LineString geometries with corresponding start points.
+- Placeholder CDL values like FILL_DATE_CREATED are auto-filled during export.
+- For full documentation, see inline docstrings in sar_drift.py and util.py.
+
+---
+
+## Return codes
+-  1: Cannot find input directory
+-  2: Cannot find metadata directory
+-  3: Input file type found in input directory
+-  4: More than one input file type found in input directory
+-  5: No .tif file found in input directory
+-  6: More than one .tif file found in input directory
+-  7: No .cdl file found in metadata directory
+-  8: More than one .cdl file found in metadata directory
+-  9: The delimiter character did not properly split the fields or the input file structure changed
+- 10: Error running `ncgen` utility
 
 ---
 

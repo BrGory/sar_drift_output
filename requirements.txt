@@ -6,3 +6,5 @@ shapely
 pyproj
 netCDF4
 scipy
+rasterio>=1.3.0
+gdal>=3.4.0
