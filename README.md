@@ -87,7 +87,7 @@ python sar_drift_output.py [options]
 ### Example:
 
 ```bash
-python sar_drift_output.py -i data/sample_drift.txt -c -v
+python sar_drift_output.py -i input -o output -m meta -t txt -d \t -p 2 -v
 ```
 
 ---
@@ -105,12 +105,10 @@ python sar_drift_output.py -i data/sample_drift.txt -c -v
 | Type                         | Description                                                         |
 | ---------------------------- | ------------------------------------------------------------------- |
 | `sar_drift_<timestamp>.gpkg` | QGIS GeoPackage with start points, end points, and drift lines      |
-| `sar_drift_<timestamp>.nc`   | CF/ACDD-compliant NetCDF with drift variables                       |
-|                              | (`dx`, `dy`, `Speed_kmdy`, `Bear_deg`)                              |
+| `sar_drift_<timestamp>.nc`   | CF/ACDD-compliant NetCDF with drift variables (`dx`, `dy`, `Speed_kmdy`, `Bear_deg`)                      |
 | `sar_drift_<timestamp>.png`  | Annotated PNG showing SAR image and vector overlays                 |
 |							   |	  - Left: Arctic overview (Cartopy, EPSG:4326) with bounding box |
-|							   |	  - Right: SAR image overlaid with quiver arrows,                |
-|							   |        	   True North arrow, and scale bar                       |
+|							   |	  - Right: SAR image overlaid with quiver arrows, True North arrow, and scale bar             |
 
 ---
 
@@ -125,15 +123,15 @@ python sar_drift_output.py -i data/sample_drift.txt -c -v
 ---
 
 ## Return codes
--  1: Cannot find input directory
--  2: Cannot find metadata directory
--  3: Input file type found in input directory
--  4: More than one input file type found in input directory
--  5: No .tif file found in input directory
--  6: More than one .tif file found in input directory
--  7: No .cdl file found in metadata directory
--  8: More than one .cdl file found in metadata directory
--  9: The delimiter character did not properly split the fields or the input file structure changed
+- 01: Cannot find input directory
+- 02: Cannot find metadata directory
+- 03: Input file type found in input directory
+- 04: More than one input file type found in input directory
+- 05: No .tif file found in input directory
+- 06: More than one .tif file found in input directory
+- 07: No .cdl file found in metadata directory
+- 08: More than one .cdl file found in metadata directory
+- 09: The delimiter character did not properly split the fields or the input file structure changed
 - 10: Error running `ncgen` utility
 
 ---
@@ -147,4 +145,3 @@ This project is licensed under the MIT License.
 ## Contact
 
 - Brendon Gory — [brendon.gory@noaa.gov](mailto:brendon.gory@noaa.gov)
-- Dr. Prasanjit Dash — [prasanjit.dash@noaa.gov](mailto:prasanjit.dash@noaa.gov)
