@@ -714,16 +714,109 @@ def overlay_sar_drift_on_geotiff(
     # --- geotiff with overlays ---
     ax = fig.add_subplot(1, 2, 2)
     
+    # -------------------------------
+#     import cartopy.crs as ccrs
+#     import numpy as np
+
+#     from pyproj import CRS
+    
+#     
+#     proj_string = (
+#         "+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 "
+#         "+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs"
+#     )
+    
+#     custom_crs = CRS.from_proj4(proj_string)
+#     cartopy_crs = ccrs.Stereographic(
+#     central_latitude=90,
+#     central_longitude=-45,
+#     true_scale_latitude=70,
+#     globe=ccrs.Globe(datum='WGS84')
+# )
+    
+    
+    # ax = fig.add_subplot(1, 2, 2, projection=cartopy_crs)
+    # # -------------------------------
+    
     # read SAR geotiff
     masked_xr, map_extent_xr = util.read_geotiff_rasterio(geotiff_path)
+    
+    # print(map_extent_xr)
     
     # plot geotiff    
     ax.imshow(
         masked_xr,
         extent=map_extent_xr,
         origin="upper",
-        cmap="gray"
+        cmap="gray",
+        # transform=ccrs.epsg(3413)
     )
+    
+    # -------------------------------
+    # Transformer from EPSG:3413 to EPSG:4326
+    # to_lonlat = Transformer.from_crs("EPSG:3413", "EPSG:4326", always_xy=True)
+    
+    # # Your EPSG:3413 extent (in meters)
+    # x_min, x_max = -2044611, -1535720
+    # y_min, y_max = -230538, 287852
+    
+    # # Convert corners to lon/lat
+    # lon_min, lat_min = to_lonlat.transform(x_min, y_min)
+    # lon_max, lat_max = to_lonlat.transform(x_max, y_max)
+    
+    # # Fix inverted bounds
+    # lon_min, lon_max = sorted([lon_min, lon_max])
+    # lat_min, lat_max = sorted([lat_min, lat_max])
+    
+    # # Graticule ticks
+    # lon_ticks_deg = np.arange(np.floor(lon_min), np.ceil(lon_max) + 1, 1)
+    # lat_ticks_deg = np.arange(np.floor(lat_min / 5) * 5,
+    #                           np.ceil(lat_max / 5) * 5 + 1,
+    #                           5)
+    
+    # print("Longitude ticks:", lon_ticks_deg)
+    # print("Latitude ticks:", lat_ticks_deg)
+
+    # # OR
+    # # for x in x_vals:
+    # #     ax.plot([x, x], [map_extent_xr[2], map_extent_xr[3]], color='lightgray', linewidth=0.5,
+    # #             transform=ccrs.epsg(3413), linestyle='--')
+    
+    # # for y in y_vals:
+    # #     ax.plot([map_extent_xr[0], map_extent_xr[1]], [y, y], color='lightgray', linewidth=0.5,
+    # #             transform=ccrs.epsg(3413), linestyle='--')    
+    
+    # gl = ax.gridlines(
+    #     crs=ccrs.PlateCarree(),
+    #     draw_labels=True,
+    #     linewidth=0.5,
+    #     color='gray',
+    #     alpha=0.7,
+    #     linestyle='--'
+    # )
+    
+    # from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+    
+    # gl.xlocator = mticker.FixedLocator(lon_ticks_deg)
+    # gl.ylocator = mticker.FixedLocator(lat_ticks_deg)
+    
+    # gl.xformatter = LongitudeFormatter()
+    # gl.yformatter = LatitudeFormatter()
+    
+    # gl.xlabel_style = {'size': 9}
+    # gl.ylabel_style = {'size': 9}
+    
+    # gl.top_labels = False
+    # gl.bottom_labels = True   # <-- Explicitly enable longitude labels
+    # gl.left_labels = False    # <-- Optional: declutter lat labels
+    # gl.right_labels = True    # <-- Optional: show latitude labels on right
+    
+    # # Optional: if labels are still not showing
+    # gl.xlines = True
+    # gl.ylines = True
+    # gl.x_inline = True
+    # gl.y_inline = True
+    # -------------------------------
     
     # Extract quiver vector data from LineStrings
     lon_start = []
@@ -886,5 +979,7 @@ def overlay_sar_drift_on_geotiff(
     fig.savefig(png_file, bbox_inches='tight', dpi=300)
     
     print('  Overlay plot created')
+    
+    plt.show()
     
     return fig

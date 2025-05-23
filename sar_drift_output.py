@@ -157,10 +157,8 @@ def read_arguments():
         util.error_msg(f"Cannot find meatdata directory `{metadata_dir}`", 2)
         
         
-    # clear and create output directory
+    # create output directory if needed
     output_dir = os.path.normpath(os.path.join(args.output_dir))
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
         
     
